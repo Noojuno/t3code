@@ -17,7 +17,6 @@ import { readNativeApi } from "../nativeApi";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { useStore } from "../store";
 import { useTerminalStateStore } from "../terminalStateStore";
-import { useThreadRunStateStore } from "../threadRunStateStore";
 import { preferredTerminalEditor } from "../terminal-links";
 import { terminalRunningSubprocessFromEvent } from "../terminalActivity";
 import { onServerConfigUpdated, onServerWelcome } from "../wsNativeApi";
@@ -135,10 +134,6 @@ function EventRouter() {
   const removeOrphanedTerminalStates = useTerminalStateStore(
     (store) => store.removeOrphanedTerminalStates,
   );
-  const syncPendingRuns = useThreadRunStateStore((store) => store.syncPendingRuns);
-  const removeOrphanedPendingRuns = useThreadRunStateStore(
-    (store) => store.removeOrphanedPendingRuns,
-  );
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const pathname = useRouterState({ select: (state) => state.location.pathname });
@@ -161,7 +156,6 @@ function EventRouter() {
       if (disposed) return;
       latestSequence = Math.max(latestSequence, snapshot.snapshotSequence);
       syncServerReadModel(snapshot);
-      syncPendingRuns(snapshot);
       const draftThreadIds = Object.keys(
         useComposerDraftStore.getState().draftThreadsByThreadId,
       ) as ThreadId[];
@@ -170,7 +164,6 @@ function EventRouter() {
         draftThreadIds,
       });
       removeOrphanedTerminalStates(activeThreadIds);
-      removeOrphanedPendingRuns(activeThreadIds);
       if (pending) {
         pending = false;
         await flushSnapshotSync();
@@ -296,9 +289,7 @@ function EventRouter() {
     navigate,
     queryClient,
     removeOrphanedTerminalStates,
-    removeOrphanedPendingRuns,
     setProjectExpanded,
-    syncPendingRuns,
     syncServerReadModel,
   ]);
 

@@ -1558,6 +1558,7 @@ function makeClaudeCodeAdapter(options?: ClaudeCodeAdapterLiveOptions) {
           ...(resumeState?.resumeSessionAt ? { resumeSessionAt: resumeState.resumeSessionAt } : {}),
           includePartialMessages: true,
           canUseTool,
+          executable: "node" as const,
           env: process.env,
           ...(input.cwd ? { additionalDirectories: [input.cwd] } : {}),
         };

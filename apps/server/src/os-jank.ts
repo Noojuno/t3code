@@ -1,18 +1,20 @@
 import * as OS from "node:os";
 import { Effect, Path } from "effect";
-import { readPathFromLoginShell } from "@t3tools/shared/shell";
+import { readEnvFromLoginShell } from "@t3tools/shared/shell";
 
 export function fixPath(): void {
   if (process.platform !== "darwin") return;
 
   try {
     const shell = process.env.SHELL ?? "/bin/zsh";
-    const result = readPathFromLoginShell(shell);
-    if (result) {
-      process.env.PATH = result;
+    const env = readEnvFromLoginShell(shell);
+    if (env) {
+      for (const [key, value] of Object.entries(env)) {
+        process.env[key] = value;
+      }
     }
   } catch {
-    // Silently ignore — keep default PATH
+    // Silently ignore — keep default environment
   }
 }
 
