@@ -205,6 +205,35 @@ function subscribe(listener: () => void): () => void {
   };
 }
 
+export type ServiceTierOverride = "auto" | "fast" | "flex";
+
+export function resolveAppServiceTier(
+  tier: ServiceTierOverride,
+): "fast" | "flex" | null {
+  return tier === "auto" ? null : tier;
+}
+
+export function shouldShowFastTierIcon(
+  model: string,
+  tier: ServiceTierOverride,
+): boolean {
+  return model === "gpt-5.4" && tier === "fast";
+}
+
+export function resolveAppModelSelection(
+  provider: ProviderKind,
+  customModels: readonly string[],
+  selectedModel: string,
+): string {
+  if (selectedModel) {
+    const options = getAppModelOptions(provider, customModels, selectedModel);
+    if (options.some((o) => o.slug === selectedModel)) {
+      return selectedModel;
+    }
+  }
+  return getModelOptions(provider)[0]?.slug ?? "";
+}
+
 export function useAppSettings() {
   const settings = useSyncExternalStore(
     subscribe,

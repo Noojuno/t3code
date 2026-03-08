@@ -57,7 +57,7 @@ function createProviderServiceHarness(
   cwd: string,
   hasSession = true,
   sessionCwd = cwd,
-  providerName: ProviderSession["provider"] = "codex",
+  providerName: "codex" | "claudeCode" = "codex",
 ) {
   const now = new Date().toISOString();
   const runtimeEventPubSub = Effect.runSync(PubSub.unbounded<ProviderRuntimeEvent>());
@@ -843,7 +843,7 @@ describe("CheckpointReactor", () => {
     expect(thread.checkpoints[0]?.checkpointTurnCount).toBe(1);
     expect(harness.provider.rollbackConversation).toHaveBeenCalledTimes(1);
     expect(harness.provider.rollbackConversation).toHaveBeenCalledWith({
-      threadId: ThreadId.makeUnsafe("thread-1"),
+      
       numTurns: 1,
     });
     expect(fs.readFileSync(path.join(harness.cwd, "README.md"), "utf8")).toBe("v2\n");
@@ -1006,11 +1006,11 @@ describe("CheckpointReactor", () => {
 
     expect(harness.provider.rollbackConversation).toHaveBeenCalledTimes(2);
     expect(harness.provider.rollbackConversation.mock.calls[0]?.[0]).toEqual({
-      threadId: ThreadId.makeUnsafe("thread-1"),
+      
       numTurns: 1,
     });
     expect(harness.provider.rollbackConversation.mock.calls[1]?.[0]).toEqual({
-      threadId: ThreadId.makeUnsafe("thread-1"),
+      
       numTurns: 1,
     });
   });

@@ -25,6 +25,10 @@ import { makeServerProviderLayer, makeServerRuntimeServicesLayer } from "./serve
 import { ProviderHealthLive } from "./provider/Layers/ProviderHealth";
 import { Server } from "./wsServer";
 import { ServerLoggerLive } from "./serverLogger";
+import { AnalyticsServiceLayerLive } from "./telemetry/Layers/AnalyticsService";
+import { AnalyticsService } from "./telemetry/Services/AnalyticsService";
+import { FetchHttpClient } from "effect/unstable/http";
+import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnapshotQuery";
 
 export class StartupError extends Data.TaggedError("StartupError")<{
   readonly message: string;
@@ -197,6 +201,9 @@ const LayerLive = (input: CliInput) =>
     Layer.provideMerge(makeServerRuntimeServicesLayer()),
     Layer.provideMerge(makeServerProviderLayer()),
     Layer.provideMerge(ProviderHealthLive),
+    Layer.provideMerge(
+      AnalyticsServiceLayerLive.pipe(Layer.provide(FetchHttpClient.layer)),
+    ),
     Layer.provideMerge(SqlitePersistence.layerConfig),
     Layer.provideMerge(ServerLoggerLive),
     Layer.provideMerge(ServerConfigLive(input)),
@@ -302,6 +309,16 @@ const logWebSocketEventsFlag = Flag.boolean("log-websocket-events").pipe(
   Flag.withAlias("log-ws-events"),
   Flag.optional,
 );
+
+export const recordStartupHeartbeat = Effect.gen(function* () {
+  const analytics = yield* AnalyticsService;
+  const { getSnapshot } = yield* ProjectionSnapshotQuery;
+  const snapshot = yield* getSnapshot();
+  yield* analytics.record("server.boot.heartbeat", {
+    threadCount: snapshot.threads.length,
+    projectCount: snapshot.projects.length,
+  });
+});
 
 export const t3Cli = Command.make("t3", {
   mode: modeFlag,

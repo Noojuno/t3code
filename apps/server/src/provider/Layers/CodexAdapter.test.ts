@@ -24,6 +24,7 @@ import {
 import { ServerConfig } from "../../config.ts";
 import { CodexAdapter } from "../Services/CodexAdapter.ts";
 import { ProviderSessionDirectory } from "../Services/ProviderSessionDirectory.ts";
+import { ProviderAdapterValidationError } from "../Errors.ts";
 import { makeCodexAdapterLive } from "./CodexAdapter.ts";
 
 const asThreadId = (value: string): ThreadId => ThreadId.makeUnsafe(value);
@@ -179,6 +180,7 @@ validationLayer("CodexAdapterLive validation", (it) => {
       assert.equal(validationManager.startSessionImpl.mock.calls.length, 0);
     }),
   );
+
 
   it.effect("maps codex model options before starting a session", () =>
     Effect.gen(function* () {

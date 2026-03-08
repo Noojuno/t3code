@@ -872,8 +872,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
   }, [modelOptionsByProvider, selectedModelForPicker, selectedProvider]);
   const searchableModelOptions = useMemo(
     () =>
-      AVAILABLE_PROVIDER_OPTIONS.filter(
-        (option) => lockedProvider === null || option.value === lockedProvider,
+      PROVIDER_OPTIONS.filter(
+        (option) =>
+          option.available && (lockedProvider === null || option.value === lockedProvider),
       ).flatMap((option) =>
         modelOptionsByProvider[option.value].map(({ slug, name }) => ({
           provider: option.value,
@@ -5383,18 +5384,7 @@ const MessagesTimeline = memo(function MessagesTimeline({
   );
 });
 
-function isAvailableProviderOption(
-  option: (typeof PROVIDER_OPTIONS)[number],
-): option is {
-  value: ProviderKind;
-  label: string;
-  available: true;
-} {
-  return option.available && option.value !== "claudeCode";
-}
-
-const AVAILABLE_PROVIDER_OPTIONS = PROVIDER_OPTIONS.filter(isAvailableProviderOption);
-const UNAVAILABLE_PROVIDER_OPTIONS = PROVIDER_OPTIONS.filter((option) => !option.available);
+const AVAILABLE_PROVIDER_OPTIONS = PROVIDER_OPTIONS.filter((option) => option.available);
 const COMING_SOON_PROVIDER_OPTIONS = [
   { id: "opencode", label: "OpenCode", icon: OpenCodeIcon },
   { id: "gemini", label: "Gemini", icon: Gemini },
@@ -5556,26 +5546,7 @@ const ProviderModelPicker = memo(function ProviderModelPicker(props: {
             </MenuSub>
           );
         })}
-        {UNAVAILABLE_PROVIDER_OPTIONS.length > 0 && <MenuDivider />}
-        {UNAVAILABLE_PROVIDER_OPTIONS.map((option) => {
-          const OptionIcon = PROVIDER_ICON_BY_PROVIDER[option.value];
-          return (
-            <MenuItem key={option.value} disabled>
-              <OptionIcon
-                aria-hidden="true"
-                className={cn(
-                  "size-4 shrink-0 opacity-80",
-                  option.value === "claudeCode" ? "" : "text-muted-foreground/85",
-                )}
-              />
-              <span>{option.label}</span>
-              <span className="ms-auto text-[11px] text-muted-foreground/80 uppercase tracking-[0.08em]">
-                Coming soon
-              </span>
-            </MenuItem>
-          );
-        })}
-        {UNAVAILABLE_PROVIDER_OPTIONS.length === 0 && <MenuDivider />}
+        <MenuDivider />
         {COMING_SOON_PROVIDER_OPTIONS.map((option) => {
           const OptionIcon = option.icon;
           return (

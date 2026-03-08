@@ -10,7 +10,7 @@ import {
 
 import type { ChatMessage, ProposedPlan, SessionPhase, ThreadSession, TurnDiffSummary } from "./types";
 
-export type ProviderPickerKind = ProviderKind | "claudeCode";
+export type ProviderPickerKind = ProviderKind | "claudeCode" | "cursor";
 
 export const PROVIDER_OPTIONS: Array<{
   value: ProviderPickerKind;
@@ -19,7 +19,7 @@ export const PROVIDER_OPTIONS: Array<{
 }> = [
   { value: "codex", label: "Codex", available: true },
   { value: "claudeCode", label: "Claude Code", available: true },
-  { value: "cursor", label: "Cursor", available: false },
+  { value: "cursor", label: "Cursor Agent", available: true },
 ];
 
 export interface WorkLogEntry {
