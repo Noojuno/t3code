@@ -93,7 +93,14 @@ const MODEL_SLUG_SET_BY_PROVIDER: Record<ProviderKind, ReadonlySet<ModelSlug>> =
   claudeCode: new Set(MODEL_OPTIONS_BY_PROVIDER.claudeCode.map((option) => option.slug)),
   codex: new Set(MODEL_OPTIONS_BY_PROVIDER.codex.map((option) => option.slug)),
   cursor: new Set(MODEL_OPTIONS_BY_PROVIDER.cursor.map((option) => option.slug)),
+  gemini: new Set(MODEL_OPTIONS_BY_PROVIDER.gemini.map((option) => option.slug)),
 };
+
+const MODEL_PROVIDER_BY_SLUG = new Map<ModelSlug, ProviderKind>(
+  Object.entries(MODEL_OPTIONS_BY_PROVIDER).flatMap(([provider, options]) =>
+    options.map((option) => [option.slug, provider as ProviderKind] as const),
+  ),
+);
 
 const CURSOR_MODEL_FAMILY_SET = new Set<CursorModelFamily>(
   CURSOR_MODEL_FAMILY_OPTIONS.map((option) => option.slug),
@@ -105,6 +112,7 @@ export interface CursorModelSelection {
   readonly fast: boolean;
   readonly thinking: boolean;
 }
+
 
 export function getModelOptions(provider: ProviderKind = "codex") {
   return MODEL_OPTIONS_BY_PROVIDER[provider];
@@ -263,6 +271,32 @@ export function resolveModelSlugForProvider(
   return resolveModelSlug(model, provider);
 }
 
+export function resolveProviderForModel(
+  model: string | null | undefined,
+  fallbackProvider: ProviderKind = "codex",
+): ProviderKind {
+  if (typeof model !== "string") {
+    return fallbackProvider;
+  }
+
+  const trimmed = model.trim();
+  if (!trimmed) {
+    return fallbackProvider;
+  }
+
+  for (const provider of Object.keys(MODEL_OPTIONS_BY_PROVIDER) as ProviderKind[]) {
+    const normalized = normalizeModelSlug(trimmed, provider);
+    if (!normalized) {
+      continue;
+    }
+    if (MODEL_PROVIDER_BY_SLUG.get(normalized) === provider) {
+      return provider;
+    }
+  }
+
+  return fallbackProvider;
+}
+
 export function getReasoningEffortOptions(
   provider: ProviderKind = "codex",
 ): ReadonlyArray<CodexReasoningEffort> {
@@ -270,6 +304,7 @@ export function getReasoningEffortOptions(
 }
 
 export function getDefaultReasoningEffort(provider: "codex"): CodexReasoningEffort;
+export function getDefaultReasoningEffort(provider: "gemini"): CodexReasoningEffort;
 export function getDefaultReasoningEffort(provider: ProviderKind): CodexReasoningEffort | null;
 export function getDefaultReasoningEffort(
   provider: ProviderKind = "codex",

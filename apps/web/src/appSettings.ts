@@ -10,6 +10,7 @@ const BUILT_IN_MODEL_SLUGS_BY_PROVIDER: Record<ProviderKind, ReadonlySet<string>
   codex: new Set(getModelOptions("codex").map((option) => option.slug)),
   claudeCode: new Set(getModelOptions("claudeCode").map((option) => option.slug)),
   cursor: new Set(getModelOptions("cursor").map((option) => option.slug)),
+  gemini: new Set(getModelOptions("gemini").map((option) => option.slug)),
 };
 
 const AppSettingsSchema = Schema.Struct({
@@ -30,6 +31,9 @@ const AppSettingsSchema = Schema.Struct({
     Schema.withConstructorDefault(() => Option.some([])),
   ),
   customCursorModels: Schema.Array(Schema.String).pipe(
+    Schema.withConstructorDefault(() => Option.some([])),
+  ),
+  customGeminiModels: Schema.Array(Schema.String).pipe(
     Schema.withConstructorDefault(() => Option.some([])),
   ),
 });
@@ -81,7 +85,39 @@ function normalizeAppSettings(settings: AppSettings): AppSettings {
     customCodexModels: normalizeCustomModelSlugs(settings.customCodexModels, "codex"),
     customClaudeModels: normalizeCustomModelSlugs(settings.customClaudeModels, "claudeCode"),
     customCursorModels: normalizeCustomModelSlugs(settings.customCursorModels, "cursor"),
+    customGeminiModels: normalizeCustomModelSlugs(settings.customGeminiModels, "gemini"),
   };
+}
+
+export function getCustomModelsForProvider(
+  settings: Pick<AppSettings, "customCodexModels" | "customClaudeModels" | "customCursorModels" | "customGeminiModels">,
+  provider: ProviderKind,
+): readonly string[] {
+  switch (provider) {
+    case "claudeCode":
+      return settings.customClaudeModels;
+    case "cursor":
+      return settings.customCursorModels;
+    case "gemini":
+      return settings.customGeminiModels;
+    case "codex":
+    default:
+      return settings.customCodexModels;
+  }
+}
+
+export function patchCustomModelsForProvider(provider: ProviderKind, models: string[]) {
+  switch (provider) {
+    case "claudeCode":
+      return { customClaudeModels: models } satisfies Partial<AppSettings>;
+    case "cursor":
+      return { customCursorModels: models } satisfies Partial<AppSettings>;
+    case "gemini":
+      return { customGeminiModels: models } satisfies Partial<AppSettings>;
+    case "codex":
+    default:
+      return { customCodexModels: models } satisfies Partial<AppSettings>;
+  }
 }
 
 export function getAppModelOptions(
@@ -206,6 +242,7 @@ function subscribe(listener: () => void): () => void {
 }
 
 export type ServiceTierOverride = "auto" | "fast" | "flex";
+export type AppServiceTier = ServiceTierOverride;
 
 export function resolveAppServiceTier(
   tier: ServiceTierOverride,

@@ -616,6 +616,7 @@ describe("PROVIDER_OPTIONS", () => {
     const cursor = PROVIDER_OPTIONS.find((option) => option.value === "cursor");
     expect(PROVIDER_OPTIONS).toEqual([
       { value: "codex", label: "Codex", available: true },
+      { value: "gemini", label: "Gemini", available: true },
       { value: "claudeCode", label: "Claude Code", available: true },
       { value: "cursor", label: "Cursor Agent", available: true },
     ]);

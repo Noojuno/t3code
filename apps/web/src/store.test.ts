@@ -186,4 +186,27 @@ describe("store read model sync", () => {
     expect(next.threads[0]?.model).toBe("composer-1.5");
     expect(next.threads[0]?.session?.provider).toBe("cursor");
   });
+
+  it("preserves Gemini provider and model from the server session", () => {
+    const initialState = makeState(makeThread());
+    const readModel = makeReadModel(
+      makeReadModelThread({
+        model: "gemini-3-flash-preview",
+        session: {
+          threadId: ThreadId.makeUnsafe("thread-1"),
+          status: "ready",
+          providerName: "gemini",
+          runtimeMode: DEFAULT_RUNTIME_MODE,
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: "2026-02-27T00:00:00.000Z",
+        },
+      }),
+    );
+
+    const next = syncServerReadModel(initialState, readModel);
+
+    expect(next.threads[0]?.model).toBe("gemini-3-flash-preview");
+    expect(next.threads[0]?.session?.provider).toBe("gemini");
+  });
 });

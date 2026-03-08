@@ -25,10 +25,19 @@ export const CursorModelOptions = Schema.Struct({
 });
 export type CursorModelOptions = typeof CursorModelOptions.Type;
 
+export const GEMINI_THINKING_LEVEL_OPTIONS = ["high", "medium", "low"] as const;
+export type GeminiThinkingLevel = (typeof GEMINI_THINKING_LEVEL_OPTIONS)[number];
+
+export const GeminiModelOptions = Schema.Struct({
+  thinkingLevel: Schema.optional(Schema.Literals(GEMINI_THINKING_LEVEL_OPTIONS)),
+});
+export type GeminiModelOptions = typeof GeminiModelOptions.Type;
+
 export const ProviderModelOptions = Schema.Struct({
   codex: Schema.optional(CodexModelOptions),
   claudeCode: Schema.optional(ClaudeCodeModelOptions),
   cursor: Schema.optional(CursorModelOptions),
+  gemini: Schema.optional(GeminiModelOptions),
 });
 export type ProviderModelOptions = typeof ProviderModelOptions.Type;
 
@@ -90,6 +99,14 @@ export const MODEL_OPTIONS_BY_PROVIDER = {
     { slug: "sonnet-4.6-thinking", name: "Claude 4.6 Sonnet (Thinking)" },
     { slug: "gemini-3.1-pro", name: "Gemini 3.1 Pro" },
   ],
+  gemini: [
+    { slug: "gemini-2.5-pro", name: "Gemini 2.5 Pro" },
+    { slug: "gemini-2.5-flash", name: "Gemini 2.5 Flash" },
+    { slug: "gemini-2.5-flash-lite", name: "Gemini 2.5 Flash Lite" },
+    { slug: "gemini-3-pro-preview", name: "Gemini 3 Pro Preview" },
+    { slug: "gemini-3.1-pro-preview", name: "Gemini 3.1 Pro Preview" },
+    { slug: "gemini-3-flash-preview", name: "Gemini 3 Flash Preview" },
+  ],
 } as const satisfies Record<ProviderKind, readonly ModelOption[]>;
 
 type BuiltInModelSlug = (typeof MODEL_OPTIONS_BY_PROVIDER)[ProviderKind][number]["slug"];
@@ -100,6 +117,7 @@ export const DEFAULT_MODEL_BY_PROVIDER: Record<ProviderKind, ModelSlug> = {
   codex: "gpt-5.3-codex",
   claudeCode: "claude-sonnet-4-6",
   cursor: "opus-4.6-thinking",
+  gemini: "gemini-2.5-pro",
 };
 
 // Backward compatibility for existing Codex-only call sites.
@@ -142,16 +160,29 @@ export const MODEL_SLUG_ALIASES_BY_PROVIDER: Record<ProviderKind, Record<string,
     "opus-4.6-thinking": "opus-4.6-thinking",
     "opus-4.5-thinking": "opus-4.5-thinking",
   },
+  gemini: {
+    "pro": "gemini-2.5-pro",
+    "flash": "gemini-2.5-flash",
+    "2.5-pro": "gemini-2.5-pro",
+    "2.5-flash": "gemini-2.5-flash",
+    "2.5-flash-lite": "gemini-2.5-flash-lite",
+    "lite": "gemini-2.5-flash-lite",
+    "3-pro": "gemini-3-pro-preview",
+    "3.1-pro": "gemini-3.1-pro-preview",
+    "3-flash": "gemini-3-flash-preview",
+  },
 };
 
 export const REASONING_EFFORT_OPTIONS_BY_PROVIDER = {
   codex: CODEX_REASONING_EFFORT_OPTIONS,
   claudeCode: [],
   cursor: [],
+  gemini: ["high", "medium", "low"] as const,
 } as const satisfies Record<ProviderKind, readonly CodexReasoningEffort[]>;
 
 export const DEFAULT_REASONING_EFFORT_BY_PROVIDER = {
   codex: "high",
   claudeCode: null,
   cursor: null,
+  gemini: "medium",
 } as const satisfies Record<ProviderKind, CodexReasoningEffort | null>;

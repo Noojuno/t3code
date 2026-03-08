@@ -9,6 +9,7 @@ import {
 import {
   getModelOptions,
   normalizeModelSlug,
+  resolveProviderForModel,
   resolveModelSlug,
   resolveModelSlugForProvider,
 } from "@t3tools/shared/model";
@@ -145,7 +146,7 @@ function toLegacySessionStatus(
 }
 
 function toLegacyProvider(providerName: string | null): ProviderKind {
-  if (providerName === "codex" || providerName === "claudeCode" || providerName === "cursor") {
+  if (providerName === "codex" || providerName === "claudeCode" || providerName === "cursor" || providerName === "gemini") {
     return providerName;
   }
   return "codex";
@@ -169,9 +170,15 @@ function inferProviderForThreadModel(input: {
   if (
     input.sessionProviderName === "codex" ||
     input.sessionProviderName === "claudeCode" ||
-    input.sessionProviderName === "cursor"
+    input.sessionProviderName === "cursor" ||
+    input.sessionProviderName === "gemini"
   ) {
     return input.sessionProviderName;
+  }
+  // Try resolveProviderForModel first for gemini and other providers
+  const resolvedProvider = resolveProviderForModel(input.model);
+  if (resolvedProvider !== "codex") {
+    return resolvedProvider;
   }
   const normalizedCursor = normalizeModelSlug(input.model, "cursor");
   if (normalizedCursor && CURSOR_DISTINCT_MODEL_SLUGS.has(normalizedCursor)) {
