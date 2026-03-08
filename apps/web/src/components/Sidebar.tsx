@@ -9,7 +9,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   DEFAULT_RUNTIME_MODE,
-  DEFAULT_MODEL_BY_PROVIDER,
+  DEFAULT_MODEL,
   type DesktopUpdateState,
   ProjectId,
   ThreadId,
@@ -82,7 +82,7 @@ function formatRelativeTime(iso: string): string {
 }
 
 interface ThreadStatusPill {
-  label: "Working" | "Connecting" | "Completed" | "Pending Approval";
+  label: "Working" | "Connecting" | "Preparing" | "Completed" | "Pending Approval";
   colorClass: string;
   dotClass: string;
   pulse: boolean;
@@ -506,7 +506,7 @@ export default function Sidebar() {
           projectId,
           title,
           workspaceRoot: cwd,
-          defaultModel: DEFAULT_MODEL_BY_PROVIDER.codex,
+          defaultModel: DEFAULT_MODEL,
           createdAt,
         });
         await handleNewThread(projectId).catch(() => undefined);
@@ -891,7 +891,7 @@ export default function Sidebar() {
         ? "text-sky-400"
         : shouldHighlightDesktopUpdateError(desktopUpdateState)
           ? "text-rose-500 animate-pulse"
-          : "text-amber-500 animate-pulse";
+        : "text-amber-500 animate-pulse";
   const newThreadShortcutLabel = useMemo(
     () =>
       shortcutLabelForCommand(keybindings, "chat.newLocal") ??
@@ -1116,6 +1116,10 @@ export default function Sidebar() {
                             thread,
                             pendingApprovalByThreadId.get(thread.id) === true,
                           );
+                          const threadTimestamp =
+                            threadStatus?.label === "Completed" && thread.latestTurn?.completedAt
+                              ? thread.latestTurn.completedAt
+                              : thread.createdAt;
                           const prStatus = prStatusIndicator(prByThreadId.get(thread.id) ?? null);
                           const terminalStatus = terminalStatusFromRunningIds(
                             selectThreadTerminalState(terminalStateByThreadId, thread.id)
@@ -1242,7 +1246,7 @@ export default function Sidebar() {
                                       isActive ? "text-foreground/65" : "text-muted-foreground/40"
                                     }`}
                                   >
-                                    {formatRelativeTime(thread.createdAt)}
+                                    {formatRelativeTime(threadTimestamp)}
                                   </span>
                                 </div>
                               </SidebarMenuSubButton>

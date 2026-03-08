@@ -1,33 +1,16 @@
 import { useCallback, useSyncExternalStore } from "react";
 import { Option, Schema } from "effect";
-import { type ProviderKind, type ProviderServiceTier } from "@t3tools/contracts";
-import { getDefaultModel, getModelOptions, normalizeModelSlug } from "@t3tools/shared/model";
+import { type ProviderKind } from "@t3tools/contracts";
+import { getModelOptions, normalizeModelSlug } from "@t3tools/shared/model";
 
 const APP_SETTINGS_STORAGE_KEY = "t3code:app-settings:v1";
 const MAX_CUSTOM_MODEL_COUNT = 32;
 export const MAX_CUSTOM_MODEL_LENGTH = 256;
-export const APP_SERVICE_TIER_OPTIONS = [
-  {
-    value: "auto",
-    label: "Automatic",
-    description: "Use Codex defaults without forcing a service tier.",
-  },
-  {
-    value: "fast",
-    label: "Fast",
-    description: "Request the fast service tier when the model supports it.",
-  },
-  {
-    value: "flex",
-    label: "Flex",
-    description: "Request the flex service tier when the model supports it.",
-  },
-] as const;
-export type AppServiceTier = (typeof APP_SERVICE_TIER_OPTIONS)[number]["value"];
-const AppServiceTierSchema = Schema.Literals(["auto", "fast", "flex"]);
-const MODELS_WITH_FAST_SUPPORT = new Set(["gpt-5.4"]);
 const BUILT_IN_MODEL_SLUGS_BY_PROVIDER: Record<ProviderKind, ReadonlySet<string>> = {
   codex: new Set(getModelOptions("codex").map((option) => option.slug)),
+  claudeCode: new Set(getModelOptions("claudeCode").map((option) => option.slug)),
+  cursor: new Set(getModelOptions("cursor").map((option) => option.slug)),
+  gemini: new Set(getModelOptions("gemini").map((option) => option.slug)),
 };
 
 const AppSettingsSchema = Schema.Struct({
@@ -41,8 +24,16 @@ const AppSettingsSchema = Schema.Struct({
   enableAssistantStreaming: Schema.Boolean.pipe(
     Schema.withConstructorDefault(() => Option.some(false)),
   ),
-  codexServiceTier: AppServiceTierSchema.pipe(Schema.withConstructorDefault(() => Option.some("auto"))),
   customCodexModels: Schema.Array(Schema.String).pipe(
+    Schema.withConstructorDefault(() => Option.some([])),
+  ),
+  customClaudeModels: Schema.Array(Schema.String).pipe(
+    Schema.withConstructorDefault(() => Option.some([])),
+  ),
+  customCursorModels: Schema.Array(Schema.String).pipe(
+    Schema.withConstructorDefault(() => Option.some([])),
+  ),
+  customGeminiModels: Schema.Array(Schema.String).pipe(
     Schema.withConstructorDefault(() => Option.some([])),
   ),
 });
@@ -51,22 +42,6 @@ export interface AppModelOption {
   slug: string;
   name: string;
   isCustom: boolean;
-}
-
-export function resolveAppServiceTier(serviceTier: AppServiceTier): ProviderServiceTier | null {
-  return serviceTier === "auto" ? null : serviceTier;
-}
-
-export function shouldShowFastTierIcon(
-  model: string | null | undefined,
-  serviceTier: AppServiceTier,
-): boolean {
-  const normalizedModel = normalizeModelSlug(model);
-  return (
-    resolveAppServiceTier(serviceTier) === "fast" &&
-    normalizedModel !== null &&
-    MODELS_WITH_FAST_SUPPORT.has(normalizedModel)
-  );
 }
 
 const DEFAULT_APP_SETTINGS = AppSettingsSchema.makeUnsafe({});
@@ -108,7 +83,41 @@ function normalizeAppSettings(settings: AppSettings): AppSettings {
   return {
     ...settings,
     customCodexModels: normalizeCustomModelSlugs(settings.customCodexModels, "codex"),
+    customClaudeModels: normalizeCustomModelSlugs(settings.customClaudeModels, "claudeCode"),
+    customCursorModels: normalizeCustomModelSlugs(settings.customCursorModels, "cursor"),
+    customGeminiModels: normalizeCustomModelSlugs(settings.customGeminiModels, "gemini"),
   };
+}
+
+export function getCustomModelsForProvider(
+  settings: Pick<AppSettings, "customCodexModels" | "customClaudeModels" | "customCursorModels" | "customGeminiModels">,
+  provider: ProviderKind,
+): readonly string[] {
+  switch (provider) {
+    case "claudeCode":
+      return settings.customClaudeModels;
+    case "cursor":
+      return settings.customCursorModels;
+    case "gemini":
+      return settings.customGeminiModels;
+    case "codex":
+    default:
+      return settings.customCodexModels;
+  }
+}
+
+export function patchCustomModelsForProvider(provider: ProviderKind, models: string[]) {
+  switch (provider) {
+    case "claudeCode":
+      return { customClaudeModels: models } satisfies Partial<AppSettings>;
+    case "cursor":
+      return { customCursorModels: models } satisfies Partial<AppSettings>;
+    case "gemini":
+      return { customGeminiModels: models } satisfies Partial<AppSettings>;
+    case "codex":
+    default:
+      return { customCodexModels: models } satisfies Partial<AppSettings>;
+  }
 }
 
 export function getAppModelOptions(
@@ -146,38 +155,6 @@ export function getAppModelOptions(
   }
 
   return options;
-}
-
-export function resolveAppModelSelection(
-  provider: ProviderKind,
-  customModels: readonly string[],
-  selectedModel: string | null | undefined,
-): string {
-  const options = getAppModelOptions(provider, customModels, selectedModel);
-  const trimmedSelectedModel = selectedModel?.trim();
-  if (trimmedSelectedModel) {
-    const direct = options.find((option) => option.slug === trimmedSelectedModel);
-    if (direct) {
-      return direct.slug;
-    }
-
-    const byName = options.find(
-      (option) => option.name.toLowerCase() === trimmedSelectedModel.toLowerCase(),
-    );
-    if (byName) {
-      return byName.slug;
-    }
-  }
-
-  const normalizedSelectedModel = normalizeModelSlug(selectedModel, provider);
-  if (!normalizedSelectedModel) {
-    return getDefaultModel(provider);
-  }
-
-  return (
-    options.find((option) => option.slug === normalizedSelectedModel)?.slug ??
-    getDefaultModel(provider)
-  );
 }
 
 export function getSlashModelOptions(
@@ -262,6 +239,36 @@ function subscribe(listener: () => void): () => void {
     listeners = listeners.filter((entry) => entry !== listener);
     window.removeEventListener("storage", onStorage);
   };
+}
+
+export type ServiceTierOverride = "auto" | "fast" | "flex";
+export type AppServiceTier = ServiceTierOverride;
+
+export function resolveAppServiceTier(
+  tier: ServiceTierOverride,
+): "fast" | "flex" | null {
+  return tier === "auto" ? null : tier;
+}
+
+export function shouldShowFastTierIcon(
+  model: string,
+  tier: ServiceTierOverride,
+): boolean {
+  return model === "gpt-5.4" && tier === "fast";
+}
+
+export function resolveAppModelSelection(
+  provider: ProviderKind,
+  customModels: readonly string[],
+  selectedModel: string,
+): string {
+  if (selectedModel) {
+    const options = getAppModelOptions(provider, customModels, selectedModel);
+    if (options.some((o) => o.slug === selectedModel)) {
+      return selectedModel;
+    }
+  }
+  return getModelOptions(provider)[0]?.slug ?? "";
 }
 
 export function useAppSettings() {

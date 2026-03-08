@@ -71,7 +71,6 @@ import {
   resolveAttachmentPathById,
 } from "./attachmentStore.ts";
 import { parseBase64DataUrl } from "./imageMime.ts";
-import { AnalyticsService } from "./telemetry/Services/AnalyticsService.ts";
 import { expandHomePath } from "./os-jank.ts";
 
 /**
@@ -216,8 +215,7 @@ export type ServerRuntimeServices =
   | GitCore
   | TerminalManager
   | Keybindings
-  | Open
-  | AnalyticsService;
+  | Open;
 
 export class ServerLifecycleError extends Schema.TaggedErrorClass<ServerLifecycleError>()(
   "ServerLifecycleError",
@@ -611,6 +609,7 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
   const orchestrationEngine = yield* OrchestrationEngineService;
   const projectionReadModelQuery = yield* ProjectionSnapshotQuery;
   const checkpointDiffQuery = yield* CheckpointDiffQuery;
+  const liveProviderService = yield* ProviderService;
   const orchestrationReactor = yield* OrchestrationReactor;
   const { openInEditor } = yield* Open;
 
@@ -705,6 +704,11 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
     ServerRuntimeServices | ServerConfig | FileSystem.FileSystem | Path.Path
   >();
   const runPromise = Effect.runPromiseWith(runtimeServices);
+  yield* Effect.addFinalizer(() =>
+    Effect.catch(liveProviderService.stopAll(), (cause) =>
+      Effect.logWarning("failed to stop provider service", { cause }),
+    ),
+  );
 
   const unsubscribeTerminalEvents = yield* terminalManager.subscribe(
     (event) => void Effect.runPromise(onTerminalEvent(event)),

@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   getAppModelOptions,
+  getCustomModelsForProvider,
   getSlashModelOptions,
   normalizeCustomModelSlugs,
+  patchCustomModelsForProvider,
   resolveAppServiceTier,
   shouldShowFastTierIcon,
   resolveAppModelSelection,
@@ -21,6 +23,27 @@ describe("normalizeCustomModelSlugs", () => {
         null,
       ]),
     ).toEqual(["custom/internal-model"]);
+  });
+
+  it("normalizes provider-specific aliases for claude and cursor", () => {
+    expect(normalizeCustomModelSlugs(["sonnet"], "claudeCode")).toEqual([]);
+    expect(normalizeCustomModelSlugs(["claude/custom-sonnet"], "claudeCode")).toEqual([
+      "claude/custom-sonnet",
+    ]);
+    expect(normalizeCustomModelSlugs(["composer"], "cursor")).toEqual([]);
+    expect(normalizeCustomModelSlugs(["cursor/custom-model"], "cursor")).toEqual([
+      "cursor/custom-model",
+    ]);
+  });
+
+  it("supports provider-specific Gemini custom models", () => {
+    const options = getAppModelOptions("gemini", ["gemini/internal-preview"]);
+
+    expect(options.at(-1)).toEqual({
+      slug: "gemini/internal-preview",
+      name: "gemini/internal-preview",
+      isCustom: true,
+    });
   });
 });
 
@@ -46,6 +69,14 @@ describe("getAppModelOptions", () => {
       name: "custom/selected-model",
       isCustom: true,
     });
+  });
+
+  it("keeps a saved custom provider model available as an exact slug option", () => {
+    const options = getAppModelOptions("claudeCode", ["claude/custom-opus"], "claude/custom-opus");
+
+    expect(options.some((option) => option.slug === "claude/custom-opus" && option.isCustom)).toBe(
+      true,
+    );
   });
 });
 
@@ -83,6 +114,14 @@ describe("getSlashModelOptions", () => {
 
     expect(options.map((option) => option.slug)).toEqual(["openai/gpt-oss-120b"]);
   });
+
+  it("includes provider-specific custom slugs in non-codex model lists", () => {
+    const claudeOptions = getAppModelOptions("claudeCode", ["claude/custom-opus"]);
+    const cursorOptions = getAppModelOptions("cursor", ["cursor/custom-model"]);
+
+    expect(claudeOptions.some((option) => option.slug === "claude/custom-opus")).toBe(true);
+    expect(cursorOptions.some((option) => option.slug === "cursor/custom-model")).toBe(true);
+  });
 });
 
 describe("resolveAppServiceTier", () => {
@@ -93,6 +132,28 @@ describe("resolveAppServiceTier", () => {
   it("preserves explicit service tier overrides", () => {
     expect(resolveAppServiceTier("fast")).toBe("fast");
     expect(resolveAppServiceTier("flex")).toBe("flex");
+  });
+});
+
+describe("provider-specific custom models", () => {
+  it("reads custom models for the requested provider", () => {
+    expect(
+      getCustomModelsForProvider(
+        {
+          customCodexModels: ["gpt-custom"],
+          customClaudeModels: [],
+          customCursorModels: [],
+          customGeminiModels: ["gemini-custom"],
+        },
+        "gemini",
+      ),
+    ).toEqual(["gemini-custom"]);
+  });
+
+  it("patches the correct settings key for Gemini custom models", () => {
+    expect(patchCustomModelsForProvider("gemini", ["gemini-custom"])).toEqual({
+      customGeminiModels: ["gemini-custom"],
+    });
   });
 });
 

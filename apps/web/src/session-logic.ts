@@ -18,8 +18,9 @@ export const PROVIDER_OPTIONS: Array<{
   available: boolean;
 }> = [
   { value: "codex", label: "Codex", available: true },
-  { value: "claudeCode", label: "Claude Code", available: false },
-  { value: "cursor", label: "Cursor", available: false },
+  { value: "gemini", label: "Gemini", available: true },
+  { value: "claudeCode", label: "Claude Code", available: true },
+  { value: "cursor", label: "Cursor Agent", available: true },
 ];
 
 export interface WorkLogEntry {
@@ -410,7 +411,6 @@ export function deriveWorkLogEntries(
   return ordered
     .filter((activity) => (latestTurnId ? activity.turnId === latestTurnId : true))
     .filter((activity) => activity.kind !== "tool.started")
-    .filter((activity) => activity.kind !== "task.started" && activity.kind !== "task.completed")
     .filter((activity) => activity.summary !== "Checkpoint captured")
     .map((activity) => {
       const payload =
