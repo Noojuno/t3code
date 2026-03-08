@@ -2427,18 +2427,14 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const onSend = async (e?: { preventDefault: () => void }) => {
     e?.preventDefault();
     const api = readNativeApi();
-    if (
-      !api ||
-      !activeThread ||
-      phase === "running" ||
-      isSendBusy ||
-      isConnecting ||
-      sendInFlightRef.current
-    ) {
+    if (!api || !activeThread || isSendBusy || isConnecting || sendInFlightRef.current) {
       return;
     }
     if (activePendingProgress) {
       onAdvanceActivePendingUserInput();
+      return;
+    }
+    if (phase === "running") {
       return;
     }
     const trimmed = prompt.trim();
@@ -3464,7 +3460,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
           activeThreadTitle={activeThread.title}
           activeProjectName={activeProject?.name}
           isGitRepo={isGitRepo}
-          openInCwd={activeThread.worktreePath ?? activeProject?.cwd ?? null}
           activeProjectScripts={activeProject?.scripts}
           preferredScriptId={
             activeProject ? (lastInvokedScriptByProjectId[activeProject.id] ?? null) : null
@@ -4095,7 +4090,6 @@ interface ChatHeaderProps {
   activeThreadTitle: string;
   activeProjectName: string | undefined;
   isGitRepo: boolean;
-  openInCwd: string | null;
   activeProjectScripts: ProjectScript[] | undefined;
   preferredScriptId: string | null;
   keybindings: ResolvedKeybindingsConfig;
@@ -4114,7 +4108,6 @@ const ChatHeader = memo(function ChatHeader({
   activeThreadTitle,
   activeProjectName,
   isGitRepo,
-  openInCwd,
   activeProjectScripts,
   preferredScriptId,
   keybindings,
