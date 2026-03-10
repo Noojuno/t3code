@@ -10,6 +10,7 @@ const UPDATE_STATE_CHANNEL = "desktop:update-state";
 const UPDATE_GET_STATE_CHANNEL = "desktop:update-get-state";
 const UPDATE_DOWNLOAD_CHANNEL = "desktop:update-download";
 const UPDATE_INSTALL_CHANNEL = "desktop:update-install";
+const TITLEBAR_OVERLAY_CHANNEL = "desktop:titlebar-overlay";
 const wsUrl = process.env.T3CODE_DESKTOP_WS_URL ?? null;
 
 contextBridge.exposeInMainWorld("desktopBridge", {
@@ -43,4 +44,6 @@ contextBridge.exposeInMainWorld("desktopBridge", {
       ipcRenderer.removeListener(UPDATE_STATE_CHANNEL, wrappedListener);
     };
   },
+  setTitleBarOverlay: (color: string, symbolColor: string) =>
+    ipcRenderer.invoke(TITLEBAR_OVERLAY_CHANNEL, color, symbolColor),
 } satisfies DesktopBridge);

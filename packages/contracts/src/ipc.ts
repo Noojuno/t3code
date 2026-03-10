@@ -106,6 +106,7 @@ export interface DesktopBridge {
   downloadUpdate: () => Promise<DesktopUpdateActionResult>;
   installUpdate: () => Promise<DesktopUpdateActionResult>;
   onUpdateState: (listener: (state: DesktopUpdateState) => void) => () => void;
+  setTitleBarOverlay: (color: string, symbolColor: string) => Promise<void>;
 }
 
 export interface NativeApi {

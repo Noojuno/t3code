@@ -25,12 +25,23 @@ function getStored(): Theme {
   return "system";
 }
 
+function syncTitleBarOverlay(isDark: boolean) {
+  // Sync the native Windows/Linux title bar overlay caption button colors with the app theme
+  const bridge = typeof window !== "undefined" ? window.desktopBridge : undefined;
+  if (bridge?.setTitleBarOverlay) {
+    const color = isDark ? "rgba(26, 26, 26, 1)" : "rgba(255, 255, 255, 1)";
+    const symbolColor = isDark ? "rgba(229, 229, 229, 1)" : "rgba(26, 26, 26, 1)";
+    void bridge.setTitleBarOverlay(color, symbolColor);
+  }
+}
+
 function applyTheme(theme: Theme, suppressTransitions = false) {
   if (suppressTransitions) {
     document.documentElement.classList.add("no-transitions");
   }
   const isDark = theme === "dark" || (theme === "system" && getSystemDark());
   document.documentElement.classList.toggle("dark", isDark);
+  syncTitleBarOverlay(isDark);
   if (suppressTransitions) {
     // Force a reflow so the no-transitions class takes effect before removal
     // oxlint-disable-next-line no-unused-expressions

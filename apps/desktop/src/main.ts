@@ -1113,6 +1113,20 @@ function registerIpcHandlers(): void {
     }
   });
 
+  // Title bar overlay theme sync (Windows/Linux: update caption button colors; macOS: no-op)
+  const TITLEBAR_OVERLAY_CHANNEL = "desktop:titlebar-overlay";
+  ipcMain.removeHandler(TITLEBAR_OVERLAY_CHANNEL);
+  ipcMain.handle(
+    TITLEBAR_OVERLAY_CHANNEL,
+    async (_event, color: string, symbolColor: string) => {
+      if (process.platform === "darwin") return;
+      const win = BrowserWindow.getFocusedWindow() ?? mainWindow;
+      if (win) {
+        win.setTitleBarOverlay({ color, symbolColor });
+      }
+    },
+  );
+
   ipcMain.removeHandler(UPDATE_GET_STATE_CHANNEL);
   ipcMain.handle(UPDATE_GET_STATE_CHANNEL, async () => updateState);
 
@@ -1151,6 +1165,25 @@ function getIconOption(): { icon: string } | Record<string, never> {
   return iconPath ? { icon: iconPath } : {};
 }
 
+function getTitleBarConfig() {
+  if (process.platform === "darwin") {
+    return {
+      titleBarStyle: "hiddenInset" as const,
+      trafficLightPosition: { x: 16, y: 18 },
+    };
+  }
+  
+  // Windows & Linux: use hidden title bar with native overlay caption buttons
+  return {
+    titleBarStyle: "hidden" as const,
+    titleBarOverlay: {
+      color: "rgba(26, 26, 26, 1)",
+      symbolColor: "rgba(229, 229, 229, 1)",
+      height: 51,
+    },
+  };
+}
+
 function createWindow(): BrowserWindow {
   const window = new BrowserWindow({
     width: 1100,
@@ -1161,8 +1194,7 @@ function createWindow(): BrowserWindow {
     autoHideMenuBar: true,
     ...getIconOption(),
     title: APP_DISPLAY_NAME,
-    titleBarStyle: "hiddenInset",
-    trafficLightPosition: { x: 16, y: 18 },
+    ...getTitleBarConfig(),
     webPreferences: {
       preload: Path.join(__dirname, "preload.js"),
       contextIsolation: true,

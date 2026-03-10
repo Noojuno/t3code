@@ -176,6 +176,11 @@ input {
   -webkit-app-region: no-drag;
 }
 
+/* Reserve native window-controls overlay space without hard-coding platform metrics. */
+.drag-region {
+  padding-right: calc(100vw - env(titlebar-area-width, 100vw) - env(titlebar-area-x, 0px));
+}
+
 /* Scrollbar styling */
 ::-webkit-scrollbar {
   width: 6px;
