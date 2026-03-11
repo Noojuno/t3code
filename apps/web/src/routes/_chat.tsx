@@ -1,6 +1,7 @@
 import { Outlet, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
 
+import { CommandPalette } from "../components/CommandPalette";
 import { DiffWorkerPoolProvider } from "../components/DiffWorkerPoolProvider";
 import ThreadSidebar from "../components/Sidebar";
 import { Sidebar, SidebarProvider } from "~/components/ui/sidebar";
@@ -36,6 +37,7 @@ function ChatRouteLayout() {
       <DiffWorkerPoolProvider>
         <Outlet />
       </DiffWorkerPoolProvider>
+      <CommandPalette />
     </SidebarProvider>
   );
 }

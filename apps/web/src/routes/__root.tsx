@@ -16,6 +16,7 @@ import { AnchoredToastProvider, ToastProvider, toastManager } from "../component
 import { serverConfigQueryOptions, serverQueryKeys } from "../lib/serverReactQuery";
 import { readNativeApi } from "../nativeApi";
 import { clearPromotedDraftThreads, useComposerDraftStore } from "../composerDraftStore";
+import { useSplitViewStore } from "../splitViewStore";
 import { useStore } from "../store";
 import { useTerminalStateStore } from "../terminalStateStore";
 import { preferredTerminalEditor } from "../terminal-links";
@@ -144,6 +145,13 @@ function EventRouter() {
 
   pathnameRef.current = pathname;
 
+  const routeThreadIdFromPathname = (nextPathname: string): ThreadId | null => {
+    if (nextPathname === "/" || nextPathname === "/settings") {
+      return null;
+    }
+    return ThreadId.makeUnsafe(nextPathname.slice(1));
+  };
+
   useEffect(() => {
     const api = readNativeApi();
     if (!api) return;
@@ -166,7 +174,20 @@ function EventRouter() {
         snapshotThreads: snapshot.threads,
         draftThreadIds,
       });
+      const nextSplitRouteThreadId = useSplitViewStore.getState().reconcileThreads(activeThreadIds);
       removeOrphanedTerminalStates(activeThreadIds);
+      const routeThreadId = routeThreadIdFromPathname(pathnameRef.current);
+      if (routeThreadId && !activeThreadIds.has(routeThreadId)) {
+        if (nextSplitRouteThreadId && nextSplitRouteThreadId !== routeThreadId) {
+          void navigate({
+            to: "/$threadId",
+            params: { threadId: nextSplitRouteThreadId },
+            replace: true,
+          });
+        } else {
+          void navigate({ to: "/", replace: true });
+        }
+      }
       if (pending) {
         pending = false;
         await flushSnapshotSync();

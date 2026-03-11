@@ -46,6 +46,12 @@ it.effect("parses keybinding rules", () =>
       command: "chat.newLocal",
     });
     assert.strictEqual(parsedLocal.command, "chat.newLocal");
+
+    const parsedSplitRight = yield* decode(KeybindingRule, {
+      key: "cmd+d",
+      command: "chat.splitRight",
+    });
+    assert.strictEqual(parsedSplitRight.command, "chat.splitRight");
   }),
 );
 

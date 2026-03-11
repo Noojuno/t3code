@@ -51,8 +51,14 @@ import { gitBranchesQueryOptions, gitCreateWorktreeMutationOptions } from "~/lib
 import { projectSearchEntriesQueryOptions } from "~/lib/projectReactQuery";
 import { serverConfigQueryOptions, serverQueryKeys } from "~/lib/serverReactQuery";
 
+import { useCommandPaletteStore } from "../commandPaletteStore";
 import { isElectron } from "../env";
-import { parseDiffRouteSearch, stripDiffSearchParams } from "../diffRouteSearch";
+import {
+  clearDiffSearchParams,
+  type DiffRouteSearch,
+  parseDiffRouteSearch,
+  stripDiffSearchParams,
+} from "../diffRouteSearch";
 import {
   type ComposerSlashCommand,
   type ComposerTrigger,
@@ -127,7 +133,6 @@ import {
 } from "../keybindings";
 import ChatMarkdown from "./ChatMarkdown";
 import PlanSidebar from "./PlanSidebar";
-import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "./ui/alert";
 import {
   BotIcon,
@@ -201,6 +206,7 @@ import {
 } from "~/projectScripts";
 import { Toggle } from "./ui/toggle";
 import { SidebarTrigger } from "./ui/sidebar";
+import { findLeaf, findLeafByThreadId, useSplitViewStore } from "../splitViewStore";
 import { newCommandId, newMessageId, newThreadId } from "~/lib/utils";
 import { readNativeApi } from "~/nativeApi";
 import { getAppModelOptions, resolveAppModelSelection, useAppSettings } from "../appSettings";
@@ -214,6 +220,7 @@ import {
 } from "../composerDraftStore";
 import { shouldUseCompactComposerFooter } from "./composerFooterLayout";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
+import { closeTerminalSession } from "../lib/closeTerminalSession";
 import { clamp } from "effect/Number";
 import { ComposerPromptEditor, type ComposerPromptEditorHandle } from "./ComposerPromptEditor";
 import { PullRequestThreadDialog } from "./PullRequestThreadDialog";
@@ -572,9 +579,11 @@ const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
 
 interface ChatViewProps {
   threadId: ThreadId;
+  /** Called to close this pane when in split view. */
+  onCloseSplitPane: (() => void) | undefined;
 }
 
-export default function ChatView({ threadId }: ChatViewProps) {
+export default function ChatView({ threadId, onCloseSplitPane }: ChatViewProps) {
   const threads = useStore((store) => store.threads);
   const projects = useStore((store) => store.projects);
   const markThreadVisited = useStore((store) => store.markThreadVisited);
@@ -618,6 +627,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
     (store) => store.getDraftThreadByProjectId,
   );
   const getDraftThread = useComposerDraftStore((store) => store.getDraftThread);
+  const createDraftThread = useComposerDraftStore((store) => store.createDraftThread);
   const setProjectDraftThreadId = useComposerDraftStore((store) => store.setProjectDraftThreadId);
   const clearProjectDraftThreadId = useComposerDraftStore(
     (store) => store.clearProjectDraftThreadId,
@@ -656,7 +666,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   // Used by "Implement in new thread" to carry the sidebar-open intent across navigation.
   const planSidebarOpenOnNextThreadRef = useRef(false);
   const [nowTick, setNowTick] = useState(() => Date.now());
-  const [terminalFocusRequestId, setTerminalFocusRequestId] = useState(0);
+  const requestTerminalFocus = useTerminalStateStore((s) => s.requestTerminalFocus);
   const [composerHighlightedItemId, setComposerHighlightedItemId] = useState<string | null>(null);
   const [pullRequestDialogState, setPullRequestDialogState] =
     useState<PullRequestDialogState | null>(null);
@@ -705,11 +715,12 @@ export default function ChatView({ threadId }: ChatViewProps) {
     selectThreadTerminalState(state.terminalStateByThreadId, threadId),
   );
   const storeSetTerminalOpen = useTerminalStateStore((s) => s.setTerminalOpen);
-  const storeSetTerminalHeight = useTerminalStateStore((s) => s.setTerminalHeight);
   const storeSplitTerminal = useTerminalStateStore((s) => s.splitTerminal);
   const storeNewTerminal = useTerminalStateStore((s) => s.newTerminal);
   const storeSetActiveTerminal = useTerminalStateStore((s) => s.setActiveTerminal);
   const storeCloseTerminal = useTerminalStateStore((s) => s.closeTerminal);
+  const openCommandPalette = useCommandPaletteStore((s) => s.openPalette);
+  const drawerOpen = terminalState.terminalOpen;
 
   const setPrompt = useCallback(
     (nextPrompt: string) => {
@@ -764,6 +775,66 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const activeLatestTurn = activeThread?.latestTurn ?? null;
   const latestTurnSettled = isLatestTurnSettled(activeLatestTurn, activeThread?.session ?? null);
   const activeProject = projects.find((p) => p.id === activeThread?.projectId);
+
+  const openSplitCommandPalette = useCallback(
+    (mode: "split-right" | "split-down") => {
+      if (!activeThreadId) {
+        return;
+      }
+
+      const splitStore = useSplitViewStore.getState();
+      const sourceLeafId = splitStore.group?.focusedLeafId ?? null;
+      const previewProjectId = activeProject?.id ?? activeThread?.projectId ?? null;
+      if (!previewProjectId) {
+        openCommandPalette({
+          mode,
+          sourceThreadId: activeThreadId,
+          sourceLeafId,
+        });
+        return;
+      }
+
+      const previewThreadId = newThreadId();
+      createDraftThread(previewThreadId, previewProjectId, {
+        createdAt: new Date().toISOString(),
+        branch: activeThread?.branch ?? null,
+        worktreePath: activeThread?.worktreePath ?? null,
+        envMode: draftThread?.envMode ?? (activeThread?.worktreePath ? "worktree" : "local"),
+        runtimeMode,
+        interactionMode,
+      });
+
+      const direction = mode === "split-right" ? "horizontal" : "vertical";
+      if (splitStore.group && sourceLeafId) {
+        splitStore.splitLeaf(sourceLeafId, previewThreadId, direction, false);
+      } else {
+        splitStore.splitThread(activeThreadId, previewThreadId, direction, false);
+      }
+
+      const previewGroup = useSplitViewStore.getState().group;
+      const previewLeafId = previewGroup
+        ? (findLeafByThreadId(previewGroup.root, previewThreadId)?.id ?? null)
+        : null;
+
+      openCommandPalette({
+        mode,
+        sourceThreadId: activeThreadId,
+        sourceLeafId,
+        previewThreadId,
+        previewLeafId,
+      });
+    },
+    [
+      activeProject?.id,
+      activeThread,
+      activeThreadId,
+      createDraftThread,
+      draftThread?.envMode,
+      interactionMode,
+      openCommandPalette,
+      runtimeMode,
+    ],
+  );
 
   const openPullRequestDialog = useCallback(
     (reference?: string) => {
@@ -1364,31 +1435,8 @@ export default function ChatView({ threadId }: ChatViewProps) {
     () => providerStatuses.find((status) => status.provider === activeProvider) ?? null,
     [activeProvider, providerStatuses],
   );
-  const activeProjectCwd = activeProject?.cwd ?? null;
-  const activeThreadWorktreePath = activeThread?.worktreePath ?? null;
-  const threadTerminalRuntimeEnv = useMemo(() => {
-    if (!activeProjectCwd) return {};
-    return projectScriptRuntimeEnv({
-      project: {
-        cwd: activeProjectCwd,
-      },
-      worktreePath: activeThreadWorktreePath,
-    });
-  }, [activeProjectCwd, activeThreadWorktreePath]);
   // Default true while loading to avoid toolbar flicker.
   const isGitRepo = branchesQuery.data?.isRepo ?? true;
-  const splitTerminalShortcutLabel = useMemo(
-    () => shortcutLabelForCommand(keybindings, "terminal.split"),
-    [keybindings],
-  );
-  const newTerminalShortcutLabel = useMemo(
-    () => shortcutLabelForCommand(keybindings, "terminal.new"),
-    [keybindings],
-  );
-  const closeTerminalShortcutLabel = useMemo(
-    () => shortcutLabelForCommand(keybindings, "terminal.close"),
-    [keybindings],
-  );
   const diffPanelShortcutLabel = useMemo(
     () => shortcutLabelForCommand(keybindings, "diff.toggle"),
     [keybindings],
@@ -1400,7 +1448,9 @@ export default function ChatView({ threadId }: ChatViewProps) {
       replace: true,
       search: (previous) => {
         const rest = stripDiffSearchParams(previous);
-        return diffOpen ? rest : { ...rest, diff: "1" };
+        return diffOpen
+          ? (clearDiffSearchParams(previous) as unknown as DiffRouteSearch)
+          : { ...rest, diff: "1" };
       },
     });
   }, [diffOpen, navigate, threadId]);
@@ -1434,6 +1484,53 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const focusComposer = useCallback(() => {
     composerEditorRef.current?.focusAtEnd();
   }, []);
+  const isTerminalFocused = useCallback((): boolean => {
+    const activeElement = document.activeElement;
+    if (!(activeElement instanceof HTMLElement)) return false;
+    if (activeElement.classList.contains("xterm-helper-textarea")) return true;
+    return activeElement.closest(".thread-terminal-drawer .xterm") !== null;
+  }, []);
+  const focusSplitPaneElement = useCallback(
+    (leafId: string, targetThreadId: ThreadId, preferTerminal: boolean) => {
+      window.requestAnimationFrame(() => {
+        if (preferTerminal) {
+          const targetTerminalState = selectThreadTerminalState(
+            useTerminalStateStore.getState().terminalStateByThreadId,
+            targetThreadId,
+          );
+          if (targetTerminalState.terminalOpen) {
+            requestTerminalFocus();
+            return;
+          }
+        }
+
+        const paneEl = document.querySelector<HTMLElement>(`[data-split-leaf-id="${leafId}"]`);
+        if (!paneEl) return;
+        const editor = paneEl.querySelector<HTMLElement>("[contenteditable=true]");
+        if (editor) {
+          editor.focus();
+          return;
+        }
+        paneEl.focus();
+      });
+    },
+    [requestTerminalFocus],
+  );
+  const toggleSplitZoom = useCallback((): boolean => {
+    const splitStore = useSplitViewStore.getState();
+    if (!splitStore.group) return false;
+    const exitingZoom = splitStore.zoomed;
+    const focusedLeafId = splitStore.group.focusedLeafId;
+    const preferTerminal = isTerminalFocused();
+    splitStore.toggleZoom();
+    if (exitingZoom) {
+      const focusedLeaf = findLeaf(splitStore.group.root, focusedLeafId);
+      if (focusedLeaf) {
+        focusSplitPaneElement(focusedLeafId, focusedLeaf.threadId, preferTerminal);
+      }
+    }
+    return true;
+  }, [focusSplitPaneElement, isTerminalFocused]);
   const scheduleComposerFocus = useCallback(() => {
     window.requestAnimationFrame(() => {
       focusComposer();
@@ -1446,62 +1543,33 @@ export default function ChatView({ threadId }: ChatViewProps) {
     },
     [activeThreadId, storeSetTerminalOpen],
   );
-  const setTerminalHeight = useCallback(
-    (height: number) => {
-      if (!activeThreadId) return;
-      storeSetTerminalHeight(activeThreadId, height);
-    },
-    [activeThreadId, storeSetTerminalHeight],
-  );
   const toggleTerminalVisibility = useCallback(() => {
     if (!activeThreadId) return;
-    setTerminalOpen(!terminalState.terminalOpen);
-  }, [activeThreadId, setTerminalOpen, terminalState.terminalOpen]);
+    setTerminalOpen(!drawerOpen);
+  }, [activeThreadId, drawerOpen, setTerminalOpen]);
   const splitTerminal = useCallback(() => {
     if (!activeThreadId || hasReachedTerminalLimit) return;
     const terminalId = `terminal-${randomUUID()}`;
     storeSplitTerminal(activeThreadId, terminalId);
-    setTerminalFocusRequestId((value) => value + 1);
-  }, [activeThreadId, storeSplitTerminal, hasReachedTerminalLimit]);
+    requestTerminalFocus();
+  }, [activeThreadId, storeSplitTerminal, hasReachedTerminalLimit, requestTerminalFocus]);
   const createNewTerminal = useCallback(() => {
     if (!activeThreadId || hasReachedTerminalLimit) return;
     const terminalId = `terminal-${randomUUID()}`;
     storeNewTerminal(activeThreadId, terminalId);
-    setTerminalFocusRequestId((value) => value + 1);
-  }, [activeThreadId, storeNewTerminal, hasReachedTerminalLimit]);
-  const activateTerminal = useCallback(
-    (terminalId: string) => {
-      if (!activeThreadId) return;
-      storeSetActiveTerminal(activeThreadId, terminalId);
-      setTerminalFocusRequestId((value) => value + 1);
-    },
-    [activeThreadId, storeSetActiveTerminal],
-  );
+    requestTerminalFocus();
+  }, [activeThreadId, storeNewTerminal, hasReachedTerminalLimit, requestTerminalFocus]);
   const closeTerminal = useCallback(
     (terminalId: string) => {
-      const api = readNativeApi();
-      if (!activeThreadId || !api) return;
+      if (!activeThreadId) return;
       const isFinalTerminal = terminalState.terminalIds.length <= 1;
-      const fallbackExitWrite = () =>
-        api.terminal
-          .write({ threadId: activeThreadId, terminalId, data: "exit\n" })
-          .catch(() => undefined);
-      if ("close" in api.terminal && typeof api.terminal.close === "function") {
-        void (async () => {
-          if (isFinalTerminal) {
-            await api.terminal
-              .clear({ threadId: activeThreadId, terminalId })
-              .catch(() => undefined);
-          }
-          await api.terminal.close({ threadId: activeThreadId, terminalId, deleteHistory: true });
-        })().catch(() => fallbackExitWrite());
-      } else {
-        void fallbackExitWrite();
-      }
+      void closeTerminalSession({ threadId: activeThreadId, terminalId, isFinalTerminal }).catch(
+        () => undefined,
+      );
       storeCloseTerminal(activeThreadId, terminalId);
-      setTerminalFocusRequestId((value) => value + 1);
+      requestTerminalFocus();
     },
-    [activeThreadId, storeCloseTerminal, terminalState.terminalIds.length],
+    [activeThreadId, storeCloseTerminal, terminalState.terminalIds.length, requestTerminalFocus],
   );
   const runProjectScript = useCallback(
     async (
@@ -1543,7 +1611,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       } else {
         storeSetActiveTerminal(activeThreadId, targetTerminalId);
       }
-      setTerminalFocusRequestId((value) => value + 1);
+      requestTerminalFocus();
 
       const runtimeEnv = projectScriptRuntimeEnv({
         project: {
@@ -1595,6 +1663,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       terminalState.activeTerminalId,
       terminalState.runningTerminalIds,
       terminalState.terminalIds,
+      requestTerminalFocus,
     ],
   );
   const persistProjectScripts = useCallback(
@@ -2073,14 +2142,18 @@ export default function ChatView({ threadId }: ChatViewProps) {
   }, [activeThread?.id]);
 
   useEffect(() => {
-    if (!activeThread?.id || terminalState.terminalOpen) return;
+    if (!activeThread?.id || drawerOpen) return;
+    const splitState = useSplitViewStore.getState();
+    if (splitState.group && splitState.getFocusedThreadId() !== activeThread.id) {
+      return;
+    }
     const frame = window.requestAnimationFrame(() => {
       focusComposer();
     });
     return () => {
       window.cancelAnimationFrame(frame);
     };
-  }, [activeThread?.id, focusComposer, terminalState.terminalOpen]);
+  }, [activeThread?.id, focusComposer, drawerOpen]);
 
   useEffect(() => {
     composerImagesRef.current = composerImages;
@@ -2301,14 +2374,13 @@ export default function ChatView({ threadId }: ChatViewProps) {
   useEffect(() => {
     if (!activeThreadId) return;
     const previous = terminalOpenByThreadRef.current[activeThreadId] ?? false;
-    const current = Boolean(terminalState.terminalOpen);
 
-    if (!previous && current) {
-      terminalOpenByThreadRef.current[activeThreadId] = current;
-      setTerminalFocusRequestId((value) => value + 1);
+    if (!previous && drawerOpen) {
+      terminalOpenByThreadRef.current[activeThreadId] = true;
+      requestTerminalFocus();
       return;
-    } else if (previous && !current) {
-      terminalOpenByThreadRef.current[activeThreadId] = current;
+    } else if (previous && !drawerOpen) {
+      terminalOpenByThreadRef.current[activeThreadId] = false;
       const frame = window.requestAnimationFrame(() => {
         focusComposer();
       });
@@ -2317,26 +2389,97 @@ export default function ChatView({ threadId }: ChatViewProps) {
       };
     }
 
-    terminalOpenByThreadRef.current[activeThreadId] = current;
-  }, [activeThreadId, focusComposer, terminalState.terminalOpen]);
+    terminalOpenByThreadRef.current[activeThreadId] = drawerOpen;
+  }, [activeThreadId, focusComposer, requestTerminalFocus, drawerOpen]);
 
   useEffect(() => {
-    const isTerminalFocused = (): boolean => {
-      const activeElement = document.activeElement;
-      if (!(activeElement instanceof HTMLElement)) return false;
-      if (activeElement.classList.contains("xterm-helper-textarea")) return true;
-      return activeElement.closest(".thread-terminal-drawer .xterm") !== null;
-    };
-
     const handler = (event: globalThis.KeyboardEvent) => {
       if (!activeThreadId || event.defaultPrevented) return;
+
+      // In split mode, only the focused pane should handle keyboard shortcuts
+      const splitState = useSplitViewStore.getState();
+      if (splitState.group && splitState.getFocusedThreadId() !== activeThreadId) return;
+
       const shortcutContext = {
         terminalFocus: isTerminalFocused(),
-        terminalOpen: Boolean(terminalState.terminalOpen),
+        terminalOpen: drawerOpen,
       };
 
+      if (!shortcutContext.terminalFocus) {
+        const isMac = isMacPlatform(navigator.platform);
+        const key = event.key.toLowerCase();
+        const isSplitRightShortcut = isMac
+          ? event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && key === "d"
+          : event.ctrlKey && !event.metaKey && event.shiftKey && !event.altKey && key === "o";
+        const isSplitDownShortcut = isMac
+          ? event.metaKey && !event.ctrlKey && event.shiftKey && !event.altKey && key === "d"
+          : event.ctrlKey && !event.metaKey && event.shiftKey && !event.altKey && key === "e";
+
+        if (isSplitRightShortcut || isSplitDownShortcut) {
+          event.preventDefault();
+          event.stopPropagation();
+          openSplitCommandPalette(isSplitRightShortcut ? "split-right" : "split-down");
+          return;
+        }
+      }
+
       const command = resolveShortcutCommand(event, keybindings, { context: shortcutContext });
-      if (!command) return;
+
+      if (!command) {
+        const isMac = isMacPlatform(navigator.platform);
+        const isMod = isMac ? event.metaKey : event.ctrlKey;
+        const isAlt = event.altKey;
+        const key = event.key.toLowerCase();
+
+        // mod+w when terminal is not focused → close split pane or close thread
+        if (isMod && key === "w" && !event.shiftKey && !isAlt && !shortcutContext.terminalFocus) {
+          event.preventDefault();
+          event.stopPropagation();
+          if (onCloseSplitPane) {
+            onCloseSplitPane();
+          } else {
+            void navigate({ to: "/" });
+          }
+          return;
+        }
+
+        // Split-specific shortcuts (navigation, zoom)
+        const splitStore = useSplitViewStore.getState();
+        if (splitStore.group) {
+          // Split focus navigation: Ctrl+Alt+Arrow (Cmd+Option+Arrow on Mac)
+          if (isMod && isAlt && !event.shiftKey) {
+            let direction: "up" | "down" | "left" | "right" | null = null;
+            if (key === "arrowup") direction = "up";
+            else if (key === "arrowdown") direction = "down";
+            else if (key === "arrowleft") direction = "left";
+            else if (key === "arrowright") direction = "right";
+
+            if (direction) {
+              event.preventDefault();
+              event.stopPropagation();
+              const wasTerminalFocused = shortcutContext.terminalFocus;
+              const newLeafId = splitStore.focusDirection(direction);
+              if (newLeafId) {
+                const targetLeaf = findLeaf(splitStore.group.root, newLeafId);
+                if (targetLeaf) {
+                  focusSplitPaneElement(newLeafId, targetLeaf.threadId, wasTerminalFocused);
+                }
+              }
+              return;
+            }
+          }
+
+          // Toggle split zoom: Mod+Shift+Enter
+          if (isMod && event.shiftKey && key === "enter" && !isAlt) {
+            event.preventDefault();
+            event.stopPropagation();
+            toggleSplitZoom();
+            return;
+          }
+        }
+
+        return;
+      }
 
       if (command === "terminal.toggle") {
         event.preventDefault();
@@ -2348,7 +2491,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       if (command === "terminal.split") {
         event.preventDefault();
         event.stopPropagation();
-        if (!terminalState.terminalOpen) {
+        if (!drawerOpen) {
           setTerminalOpen(true);
         }
         splitTerminal();
@@ -2358,7 +2501,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       if (command === "terminal.close") {
         event.preventDefault();
         event.stopPropagation();
-        if (!terminalState.terminalOpen) return;
+        if (!drawerOpen) return;
         closeTerminal(terminalState.activeTerminalId);
         return;
       }
@@ -2366,7 +2509,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
       if (command === "terminal.new") {
         event.preventDefault();
         event.stopPropagation();
-        if (!terminalState.terminalOpen) {
+        if (!drawerOpen) {
           setTerminalOpen(true);
         }
         createNewTerminal();
@@ -2377,6 +2520,13 @@ export default function ChatView({ threadId }: ChatViewProps) {
         event.preventDefault();
         event.stopPropagation();
         onToggleDiff();
+        return;
+      }
+
+      if (command === "chat.splitRight" || command === "chat.splitDown") {
+        event.preventDefault();
+        event.stopPropagation();
+        openSplitCommandPalette(command === "chat.splitRight" ? "split-right" : "split-down");
         return;
       }
 
@@ -2392,16 +2542,22 @@ export default function ChatView({ threadId }: ChatViewProps) {
     return () => window.removeEventListener("keydown", handler);
   }, [
     activeProject,
-    terminalState.terminalOpen,
+    drawerOpen,
     terminalState.activeTerminalId,
     activeThreadId,
     closeTerminal,
     createNewTerminal,
+    focusSplitPaneElement,
+    isTerminalFocused,
     setTerminalOpen,
+    openSplitCommandPalette,
     runProjectScript,
     splitTerminal,
     keybindings,
+    navigate,
+    onCloseSplitPane,
     onToggleDiff,
+    toggleSplitZoom,
     toggleTerminalVisibility,
   ]);
 
@@ -3480,6 +3636,15 @@ export default function ChatView({ threadId }: ChatViewProps) {
       void onSend();
       return true;
     }
+
+    // Mod+Shift+Enter → toggle split zoom
+    if (key === "Enter" && event.shiftKey) {
+      const isMod = isMacPlatform(navigator.platform) ? event.metaKey : event.ctrlKey;
+      if (isMod && toggleSplitZoom()) {
+        return true;
+      }
+    }
+
     return false;
   };
   const onToggleWorkGroup = useCallback((groupId: string) => {
@@ -3572,6 +3737,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
           onUpdateProjectScript={updateProjectScript}
           onDeleteProjectScript={deleteProjectScript}
           onToggleDiff={onToggleDiff}
+          onCloseSplitPane={onCloseSplitPane}
         />
       </header>
 
@@ -4154,34 +4320,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
       </div>
       {/* end horizontal flex container */}
 
-      {(() => {
-        if (!terminalState.terminalOpen || !activeProject) {
-          return null;
-        }
-        return (
-          <ThreadTerminalDrawer
-            key={activeThread.id}
-            threadId={activeThread.id}
-            cwd={gitCwd ?? activeProject.cwd}
-            runtimeEnv={threadTerminalRuntimeEnv}
-            height={terminalState.terminalHeight}
-            terminalIds={terminalState.terminalIds}
-            activeTerminalId={terminalState.activeTerminalId}
-            terminalGroups={terminalState.terminalGroups}
-            activeTerminalGroupId={terminalState.activeTerminalGroupId}
-            focusRequestId={terminalFocusRequestId}
-            onSplitTerminal={splitTerminal}
-            onNewTerminal={createNewTerminal}
-            splitShortcutLabel={splitTerminalShortcutLabel ?? undefined}
-            newShortcutLabel={newTerminalShortcutLabel ?? undefined}
-            closeShortcutLabel={closeTerminalShortcutLabel ?? undefined}
-            onActiveTerminalChange={activateTerminal}
-            onCloseTerminal={closeTerminal}
-            onHeightChange={setTerminalHeight}
-          />
-        );
-      })()}
-
       {expandedImage && expandedImageItem && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 px-4 py-6 [-webkit-app-region:no-drag]"
@@ -4271,6 +4409,8 @@ interface ChatHeaderProps {
   onUpdateProjectScript: (scriptId: string, input: NewProjectScriptInput) => Promise<void>;
   onDeleteProjectScript: (scriptId: string) => Promise<void>;
   onToggleDiff: () => void;
+  /** Called to close this pane in split view. Only present when in a split. */
+  onCloseSplitPane: (() => void) | undefined;
 }
 
 const ChatHeader = memo(function ChatHeader({
@@ -4291,6 +4431,7 @@ const ChatHeader = memo(function ChatHeader({
   onUpdateProjectScript,
   onDeleteProjectScript,
   onToggleDiff,
+  onCloseSplitPane,
 }: ChatHeaderProps) {
   return (
     <div className="flex min-w-0 flex-1 items-center gap-2">
@@ -4357,6 +4498,24 @@ const ChatHeader = memo(function ChatHeader({
                 : "Toggle diff panel"}
           </TooltipPopup>
         </Tooltip>
+        {onCloseSplitPane && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  className="shrink-0"
+                  onClick={onCloseSplitPane}
+                  aria-label="Close split pane"
+                  variant="outline"
+                  size="xs"
+                >
+                  <XIcon className="size-3" />
+                </Button>
+              }
+            />
+            <TooltipPopup side="bottom">Close split pane</TooltipPopup>
+          </Tooltip>
+        )}
       </div>
     </div>
   );

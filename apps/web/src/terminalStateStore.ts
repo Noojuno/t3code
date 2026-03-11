@@ -467,6 +467,11 @@ function updateTerminalStateByThreadId(
 
 interface TerminalStateStoreState {
   terminalStateByThreadId: Record<ThreadId, ThreadTerminalState>;
+  /**
+   * Monotonically increasing counter used to trigger focus on the terminal
+   * viewport. Bumping this value causes the active terminal to re-focus.
+   */
+  terminalFocusRequestId: number;
   setTerminalOpen: (threadId: ThreadId, open: boolean) => void;
   setTerminalHeight: (threadId: ThreadId, height: number) => void;
   splitTerminal: (threadId: ThreadId, terminalId: string) => void;
@@ -480,6 +485,8 @@ interface TerminalStateStoreState {
   ) => void;
   clearTerminalState: (threadId: ThreadId) => void;
   removeOrphanedTerminalStates: (activeThreadIds: Set<ThreadId>) => void;
+  /** Bump the focus request counter so the terminal viewport re-focuses. */
+  requestTerminalFocus: () => void;
 }
 
 export const useTerminalStateStore = create<TerminalStateStoreState>()(
@@ -506,6 +513,7 @@ export const useTerminalStateStore = create<TerminalStateStoreState>()(
 
       return {
         terminalStateByThreadId: {},
+        terminalFocusRequestId: 0,
         setTerminalOpen: (threadId, open) =>
           updateTerminal(threadId, (state) => setThreadTerminalOpen(state, open)),
         setTerminalHeight: (threadId, height) =>
@@ -536,6 +544,8 @@ export const useTerminalStateStore = create<TerminalStateStoreState>()(
             }
             return { terminalStateByThreadId: next };
           }),
+        requestTerminalFocus: () =>
+          set((state) => ({ terminalFocusRequestId: state.terminalFocusRequestId + 1 })),
       };
     },
     {

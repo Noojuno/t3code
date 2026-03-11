@@ -250,6 +250,7 @@ function AutocompleteTrigger({
 }
 
 const useAutocompleteFilter = AutocompletePrimitive.useFilter;
+const useAutocompleteFilteredItems = AutocompletePrimitive.useFilteredItems;
 
 export {
   Autocomplete,
@@ -268,4 +269,5 @@ export {
   AutocompleteRow,
   AutocompleteCollection,
   useAutocompleteFilter,
+  useAutocompleteFilteredItems,
 };
