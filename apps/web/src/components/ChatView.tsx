@@ -178,7 +178,7 @@ const SCRIPT_TERMINAL_ROWS = 30;
 
 interface ChatViewProps {
   threadId: ThreadId;
-  onCloseSplitPane: (() => void) | undefined;
+  onCloseSplitPane?: (() => void) | undefined;
 }
 
 export default function ChatView({ threadId, onCloseSplitPane }: ChatViewProps) {
@@ -1287,13 +1287,13 @@ export default function ChatView({ threadId, onCloseSplitPane }: ChatViewProps) 
       setTerminalOpen,
       setThreadError,
       storeNewTerminal,
-        storeSetActiveTerminal,
-        terminalState.activeTerminalId,
-        terminalState.runningTerminalIds,
-        terminalState.terminalIds,
-        requestTerminalFocus,
-      ],
-    );
+      storeSetActiveTerminal,
+      terminalState.activeTerminalId,
+      terminalState.runningTerminalIds,
+      terminalState.terminalIds,
+      requestTerminalFocus,
+    ],
+  );
   const persistProjectScripts = useCallback(
     async (input: {
       projectId: ProjectId;
