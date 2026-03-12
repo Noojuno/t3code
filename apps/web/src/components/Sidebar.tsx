@@ -99,6 +99,7 @@ import {
   collectThreadIds,
   findLeaf,
   findLeafByThreadId,
+  firstLeaf,
 } from "../splitViewStore";
 import { formatWorktreePathForDisplay, getOrphanedWorktreePathForThread } from "../worktreeCleanup";
 import { isNonEmpty as isNonEmptyString } from "effect/String";
@@ -432,15 +433,21 @@ export default function Sidebar() {
   const addProjectInputRef = useRef<HTMLInputElement | null>(null);
   const [renamingThreadId, setRenamingThreadId] = useState<ThreadId | null>(null);
   const [renamingTitle, setRenamingTitle] = useState("");
+  const [renamingWorkspaceId, setRenamingWorkspaceId] = useState<string | null>(null);
+  const [renamingWorkspaceTitle, setRenamingWorkspaceTitle] = useState("");
   const [expandedThreadListsByProject, setExpandedThreadListsByProject] = useState<
     ReadonlySet<ProjectId>
   >(() => new Set());
   const renamingCommittedRef = useRef(false);
   const renamingInputRef = useRef<HTMLInputElement | null>(null);
+  const renamingWorkspaceCommittedRef = useRef(false);
+  const renamingWorkspaceInputRef = useRef<HTMLInputElement | null>(null);
   const dragInProgressRef = useRef(false);
   const suppressProjectClickAfterDragRef = useRef(false);
   const [desktopUpdateState, setDesktopUpdateState] = useState<DesktopUpdateState | null>(null);
-  const [splitViewExpanded, setSplitViewExpanded] = useState(true);
+  const [expandedWorkspaceIds, setExpandedWorkspaceIds] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   const selectedThreadIds = useThreadSelectionStore((s) => s.selectedThreadIds);
   const toggleThreadSelection = useThreadSelectionStore((s) => s.toggleThread);
   const rangeSelectTo = useThreadSelectionStore((s) => s.rangeSelectTo);
@@ -449,22 +456,25 @@ export default function Sidebar() {
   const setSelectionAnchor = useThreadSelectionStore((s) => s.setAnchor);
 
   // Split view
-  const splitGroup = useSplitViewStore((s) => s.group);
+  const workspaces = useSplitViewStore((s) => s.workspaces);
+  const activeWorkspaceId = useSplitViewStore((s) => s.activeWorkspaceId);
   const splitZoomed = useSplitViewStore((s) => s.zoomed);
   const closePane = useSplitViewStore((s) => s.closePane);
-  const unsplit = useSplitViewStore((s) => s.unsplit);
-  const replaceThreadInFocusedLeaf = useSplitViewStore((s) => s.replaceThreadInFocusedLeaf);
+  const closeWorkspace = useSplitViewStore((s) => s.closeWorkspace);
+  const renameWorkspace = useSplitViewStore((s) => s.renameWorkspace);
+  const activateWorkspaceById = useSplitViewStore((s) => s.activateWorkspace);
+  const deactivateWorkspace = useSplitViewStore((s) => s.deactivateWorkspace);
   const setFocusedLeaf = useSplitViewStore((s) => s.setFocusedLeaf);
-  const isSplitView = splitGroup !== null;
-  const splitThreadIds = useMemo(
-    () => (splitGroup ? new Set(collectThreadIds(splitGroup.root)) : new Set<ThreadId>()),
-    [splitGroup],
-  );
-  const focusedSplitThreadId = useMemo(() => {
-    if (!splitGroup) return null;
-    const leaf = findLeaf(splitGroup.root, splitGroup.focusedLeafId);
-    return leaf?.threadId ?? null;
-  }, [splitGroup]);
+  const isSplitView = activeWorkspaceId !== null;
+  const workspaceThreadIds = useMemo(() => {
+    const next = new Set<ThreadId>();
+    for (const workspace of workspaces) {
+      for (const threadId of collectThreadIds(workspace.root)) {
+        next.add(threadId);
+      }
+    }
+    return next;
+  }, [workspaces]);
   const shouldBrowseForProjectImmediately = isElectron;
   const shouldShowProjectPathEntry = addingProject && !shouldBrowseForProjectImmediately;
   const pendingApprovalByThreadId = useMemo(() => {
@@ -748,6 +758,11 @@ export default function Sidebar() {
     renamingInputRef.current = null;
   }, []);
 
+  const cancelWorkspaceRename = useCallback(() => {
+    setRenamingWorkspaceId(null);
+    renamingWorkspaceInputRef.current = null;
+  }, []);
+
   const commitRename = useCallback(
     async (threadId: ThreadId, newTitle: string, originalTitle: string) => {
       const finishRename = () => {
@@ -790,6 +805,32 @@ export default function Sidebar() {
       finishRename();
     },
     [],
+  );
+
+  const commitWorkspaceRename = useCallback(
+    (workspaceId: string, nextName: string, originalName: string) => {
+      const finishRename = () => {
+        setRenamingWorkspaceId((current) => {
+          if (current !== workspaceId) return current;
+          renamingWorkspaceInputRef.current = null;
+          return null;
+        });
+      };
+
+      const trimmed = nextName.trim();
+      if (trimmed.length === 0) {
+        toastManager.add({ type: "warning", title: "Workspace name cannot be empty" });
+        finishRename();
+        return;
+      }
+      if (trimmed === originalName) {
+        finishRename();
+        return;
+      }
+      renameWorkspace(workspaceId, trimmed);
+      finishRename();
+    },
+    [renameWorkspace],
   );
 
   /**
@@ -1023,38 +1064,54 @@ export default function Sidebar() {
     ],
   );
 
+  const handleWorkspaceContextMenu = useCallback(
+    async (workspaceId: string, position: { x: number; y: number }) => {
+      const api = readNativeApi();
+      if (!api) return;
+      const workspace = workspaces.find((entry) => entry.id === workspaceId);
+      if (!workspace) return;
+
+      const clicked = await api.contextMenu.show(
+        [
+          { id: "rename", label: "Rename workspace" },
+          { id: "close", label: "Close workspace", destructive: true },
+        ],
+        position,
+      );
+
+      if (clicked === "rename") {
+        setRenamingWorkspaceId(workspaceId);
+        setRenamingWorkspaceTitle(workspace.name);
+        renamingWorkspaceCommittedRef.current = false;
+        return;
+      }
+
+      if (clicked !== "close") return;
+      const fallbackThreadId = closeWorkspace(workspaceId);
+      if (fallbackThreadId) {
+        void navigate({
+          to: "/$threadId",
+          params: { threadId: fallbackThreadId },
+        });
+      }
+    },
+    [closeWorkspace, navigate, workspaces],
+  );
+
   const activateThread = useCallback(
     (threadId: ThreadId) => {
       if (selectedThreadIds.size > 0) {
         clearSelection();
       }
       setSelectionAnchor(threadId);
-
-      if (isSplitView && splitGroup) {
-        const existingLeaf = findLeafByThreadId(splitGroup.root, threadId);
-        if (existingLeaf) {
-          setFocusedLeaf(existingLeaf.id);
-        } else {
-          replaceThreadInFocusedLeaf(threadId);
-        }
-        return;
-      }
+      deactivateWorkspace();
 
       void navigate({
         to: "/$threadId",
         params: { threadId },
       });
     },
-    [
-      clearSelection,
-      isSplitView,
-      navigate,
-      replaceThreadInFocusedLeaf,
-      selectedThreadIds.size,
-      setFocusedLeaf,
-      setSelectionAnchor,
-      splitGroup,
-    ],
+    [clearSelection, deactivateWorkspace, navigate, selectedThreadIds.size, setSelectionAnchor],
   );
 
   const handleThreadClick = useCallback(
@@ -1082,6 +1139,18 @@ export default function Sidebar() {
       activateThread(threadId);
     },
     [activateThread, rangeSelectTo, toggleThreadSelection],
+  );
+
+  const activateWorkspace = useCallback(
+    (workspaceId: string) => {
+      const focusedThreadId = activateWorkspaceById(workspaceId);
+      if (!focusedThreadId) return;
+      void navigate({
+        to: "/$threadId",
+        params: { threadId: focusedThreadId },
+      });
+    },
+    [activateWorkspaceById, navigate],
   );
 
   const handleProjectContextMenu = useCallback(
@@ -1414,6 +1483,38 @@ export default function Sidebar() {
     });
   }, []);
 
+  const toggleWorkspaceExpanded = useCallback((workspaceId: string) => {
+    setExpandedWorkspaceIds((current) => {
+      const next = new Set(current);
+      if (next.has(workspaceId)) {
+        next.delete(workspaceId);
+      } else {
+        next.add(workspaceId);
+      }
+      return next;
+    });
+  }, []);
+
+  useEffect(() => {
+    setExpandedWorkspaceIds((current) => {
+      const next = new Set(current);
+      let changed = false;
+      for (const workspace of workspaces) {
+        if (!next.has(workspace.id)) {
+          next.add(workspace.id);
+          changed = true;
+        }
+      }
+      for (const workspaceId of current) {
+        if (workspaces.some((workspace) => workspace.id === workspaceId)) continue;
+        next.delete(workspaceId);
+        changed = true;
+      }
+      if (!changed) return current;
+      return next;
+    });
+  }, [workspaces]);
+
   const wordmark = (
     <div className="flex items-center gap-2">
       <SidebarTrigger className="shrink-0 md:hidden" />
@@ -1495,6 +1596,236 @@ export default function Sidebar() {
             </Alert>
           </SidebarGroup>
         ) : null}
+        <SidebarGroup className="px-2 pt-2 pb-0">
+          <div className="mb-1 flex items-center justify-between px-2">
+            <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
+              Workspaces
+            </span>
+          </div>
+          {workspaces.length > 0 ? (
+            <SidebarMenu>
+              {workspaces.map((workspace) => {
+                const isExpanded = expandedWorkspaceIds.has(workspace.id);
+                const workspaceThreadIds = collectThreadIds(workspace.root);
+                const isWorkspaceActive = activeWorkspaceId === workspace.id && isSplitView;
+                const workspaceFocusedThreadId =
+                  findLeaf(workspace.root, workspace.focusedLeafId)?.threadId ??
+                  firstLeaf(workspace.root).threadId;
+
+                return (
+                  <SidebarMenuItem key={workspace.id}>
+                    <Collapsible className="group/collapsible" open={isExpanded}>
+                      <div className="group/split-header relative">
+                        <SidebarMenuButton
+                          size="sm"
+                          isActive={isWorkspaceActive}
+                          className="gap-2 px-2 py-1.5 text-left hover:bg-accent group-hover/split-header:bg-accent group-hover/split-header:text-sidebar-accent-foreground"
+                          onClick={() => {
+                            if (isWorkspaceActive) {
+                              toggleWorkspaceExpanded(workspace.id);
+                              return;
+                            }
+                            activateWorkspace(workspace.id);
+                          }}
+                          onContextMenu={(event) => {
+                            event.preventDefault();
+                            void handleWorkspaceContextMenu(workspace.id, {
+                              x: event.clientX,
+                              y: event.clientY,
+                            });
+                          }}
+                        >
+                          <ChevronRightIcon
+                            className={`-ml-0.5 size-3.5 shrink-0 text-muted-foreground/70 transition-transform duration-150 ${isExpanded ? "rotate-90" : ""}`}
+                          />
+                          <ColumnsIcon className="size-3.5 shrink-0 text-primary/60" />
+                          {renamingWorkspaceId === workspace.id ? (
+                            <input
+                              ref={(el) => {
+                                if (el && renamingWorkspaceInputRef.current !== el) {
+                                  renamingWorkspaceInputRef.current = el;
+                                  el.focus();
+                                  el.select();
+                                }
+                              }}
+                              className="min-w-0 flex-1 truncate rounded border border-ring bg-transparent px-0.5 text-xs outline-none"
+                              value={renamingWorkspaceTitle}
+                              onChange={(event) => setRenamingWorkspaceTitle(event.target.value)}
+                              onKeyDown={(event) => {
+                                event.stopPropagation();
+                                if (event.key === "Enter") {
+                                  event.preventDefault();
+                                  renamingWorkspaceCommittedRef.current = true;
+                                  commitWorkspaceRename(
+                                    workspace.id,
+                                    renamingWorkspaceTitle,
+                                    workspace.name,
+                                  );
+                                } else if (event.key === "Escape") {
+                                  event.preventDefault();
+                                  renamingWorkspaceCommittedRef.current = true;
+                                  cancelWorkspaceRename();
+                                }
+                              }}
+                              onBlur={() => {
+                                if (!renamingWorkspaceCommittedRef.current) {
+                                  commitWorkspaceRename(
+                                    workspace.id,
+                                    renamingWorkspaceTitle,
+                                    workspace.name,
+                                  );
+                                }
+                              }}
+                              onClick={(event) => event.stopPropagation()}
+                            />
+                          ) : (
+                            <span className="flex-1 truncate text-xs font-medium text-foreground/90">
+                              {workspace.name}
+                            </span>
+                          )}
+                          <span className="shrink-0 text-[10px] text-muted-foreground/60">
+                            {workspaceThreadIds.length}
+                          </span>
+                        </SidebarMenuButton>
+                        <Tooltip>
+                          <TooltipTrigger
+                            render={
+                              <SidebarMenuAction
+                                render={<button type="button" aria-label="Close workspace" />}
+                                showOnHover
+                                className="top-1 right-1 size-5 rounded-md p-0 text-muted-foreground/70 hover:bg-destructive/10 hover:text-destructive"
+                                onClick={(event) => {
+                                  event.preventDefault();
+                                  event.stopPropagation();
+                                  const fallbackThreadId = closeWorkspace(workspace.id);
+                                  if (fallbackThreadId) {
+                                    void navigate({
+                                      to: "/$threadId",
+                                      params: { threadId: fallbackThreadId },
+                                    });
+                                  }
+                                }}
+                              >
+                                <XIcon className="size-3.5" />
+                              </SidebarMenuAction>
+                            }
+                          />
+                          <TooltipPopup side="top">Close workspace</TooltipPopup>
+                        </Tooltip>
+                      </div>
+
+                      <CollapsibleContent keepMounted>
+                        <SidebarMenuSub className="mx-1 my-0 w-full translate-x-0 gap-0.5 px-1.5 py-0">
+                          {workspaceThreadIds.map((tid) => {
+                            const thread = threads.find((t) => t.id === tid);
+                            const draftThread = thread ? null : getDraftThread(tid);
+                            if (!thread && !draftThread) return null;
+                            const isFocused = isWorkspaceActive && workspaceFocusedThreadId === tid;
+                            const leaf = findLeafByThreadId(workspace.root, tid);
+                            const threadStatus = thread
+                              ? resolveThreadStatusPill({
+                                  thread,
+                                  hasPendingApprovals:
+                                    pendingApprovalByThreadId.get(thread.id) === true,
+                                  hasPendingUserInput:
+                                    pendingUserInputByThreadId.get(thread.id) === true,
+                                })
+                              : null;
+                            const prStatus = thread
+                              ? prStatusIndicator(prByThreadId.get(thread.id) ?? null)
+                              : null;
+                            const terminalStatus = thread
+                              ? terminalStatusFromRunningIds(
+                                  selectThreadTerminalState(terminalStateByThreadId, thread.id)
+                                    .runningTerminalIds,
+                                )
+                              : null;
+                            const createdAt =
+                              thread?.createdAt ??
+                              draftThread?.createdAt ??
+                              new Date().toISOString();
+
+                            return (
+                              <SidebarThreadRow
+                                key={`${workspace.id}:${tid}`}
+                                title={
+                                  <span className="min-w-0 flex-1 truncate text-xs">
+                                    {thread?.title || "New thread"}
+                                  </span>
+                                }
+                                titleSuffix={
+                                  splitZoomed && isFocused ? (
+                                    <SearchIcon className="size-3 shrink-0 text-primary/60" />
+                                  ) : undefined
+                                }
+                                threadStatus={threadStatus}
+                                terminalStatus={terminalStatus}
+                                prStatus={prStatus}
+                                isActive={isFocused}
+                                relativeTimeLabel={formatRelativeTime(createdAt)}
+                                onOpenPr={openPrLink}
+                                onClick={() => {
+                                  activateWorkspaceById(workspace.id);
+                                  if (leaf) {
+                                    setFocusedLeaf(leaf.id);
+                                  }
+                                  void navigate({
+                                    to: "/$threadId",
+                                    params: { threadId: tid },
+                                  });
+                                }}
+                                onKeyDown={(event) => {
+                                  if (event.key !== "Enter" && event.key !== " ") return;
+                                  event.preventDefault();
+                                  activateWorkspaceById(workspace.id);
+                                  if (leaf) {
+                                    setFocusedLeaf(leaf.id);
+                                  }
+                                  void navigate({
+                                    to: "/$threadId",
+                                    params: { threadId: tid },
+                                  });
+                                }}
+                                onContextMenu={(event) => {
+                                  event.preventDefault();
+                                  const api = readNativeApi();
+                                  if (!api) return;
+                                  void api.contextMenu
+                                    .show([{ id: "close-pane", label: "Close this pane" }], {
+                                      x: event.clientX,
+                                      y: event.clientY,
+                                    })
+                                    .then((clicked) => {
+                                      if (clicked !== "close-pane" || !leaf) return;
+                                      activateWorkspaceById(workspace.id);
+                                      const remaining = closePane(leaf.id);
+                                      if (remaining) {
+                                        void navigate({
+                                          to: "/$threadId",
+                                          params: { threadId: remaining },
+                                        });
+                                      } else {
+                                        void navigate({
+                                          to: "/$threadId",
+                                          params: { threadId: tid },
+                                        });
+                                      }
+                                    });
+                                }}
+                              />
+                            );
+                          })}
+                        </SidebarMenuSub>
+                      </CollapsibleContent>
+                    </Collapsible>
+                  </SidebarMenuItem>
+                );
+              })}
+            </SidebarMenu>
+          ) : (
+            <div className="px-2 pb-1 text-xs text-muted-foreground/60">No workspaces yet</div>
+          )}
+        </SidebarGroup>
         <SidebarGroup className="px-2 py-2">
           <div className="mb-1 flex items-center justify-between px-2">
             <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
@@ -1521,161 +1852,6 @@ export default function Sidebar() {
               <TooltipPopup side="right">Add project</TooltipPopup>
             </Tooltip>
           </div>
-
-          {isSplitView && splitGroup && (
-            <div className="mb-2">
-              <SidebarMenu>
-                <SidebarMenuItem>
-                  <Collapsible
-                    className="group/collapsible"
-                    open={splitViewExpanded}
-                    onOpenChange={setSplitViewExpanded}
-                  >
-                    <div className="group/split-header relative">
-                      <SidebarMenuButton
-                        size="sm"
-                        className="gap-2 px-2 py-1.5 text-left hover:bg-accent group-hover/split-header:bg-accent group-hover/split-header:text-sidebar-accent-foreground"
-                        onClick={() => setSplitViewExpanded((prev) => !prev)}
-                      >
-                        <ChevronRightIcon
-                          className={`-ml-0.5 size-3.5 shrink-0 text-muted-foreground/70 transition-transform duration-150 ${splitViewExpanded ? "rotate-90" : ""}`}
-                        />
-                        <ColumnsIcon className="size-3.5 shrink-0 text-primary/60" />
-                        <span className="flex-1 truncate text-xs font-medium text-foreground/90">
-                          Split View
-                        </span>
-                      </SidebarMenuButton>
-                      <Tooltip>
-                        <TooltipTrigger
-                          render={
-                            <SidebarMenuAction
-                              render={<button type="button" aria-label="Close split view" />}
-                              showOnHover
-                              className="top-1 right-1 size-5 rounded-md p-0 text-muted-foreground/70 hover:bg-destructive/10 hover:text-destructive"
-                              onClick={(event) => {
-                                event.preventDefault();
-                                event.stopPropagation();
-                                const threadIds = unsplit();
-                                if (threadIds.length > 0) {
-                                  void navigate({
-                                    to: "/$threadId",
-                                    params: { threadId: threadIds[0]! },
-                                  });
-                                }
-                              }}
-                            >
-                              <XIcon className="size-3.5" />
-                            </SidebarMenuAction>
-                          }
-                        />
-                        <TooltipPopup side="top">Close split view</TooltipPopup>
-                      </Tooltip>
-                    </div>
-
-                    <CollapsibleContent keepMounted>
-                      <SidebarMenuSub className="mx-1 my-0 w-full translate-x-0 gap-0.5 px-1.5 py-0">
-                        {collectThreadIds(splitGroup.root).map((tid) => {
-                          const thread = threads.find((t) => t.id === tid);
-                          const draftThread = thread ? null : getDraftThread(tid);
-                          if (!thread && !draftThread) return null;
-                          const isFocused = focusedSplitThreadId === tid;
-                          const leaf = findLeafByThreadId(splitGroup.root, tid);
-                          const threadStatus = thread
-                            ? resolveThreadStatusPill({
-                                thread,
-                                hasPendingApprovals:
-                                  pendingApprovalByThreadId.get(thread.id) === true,
-                                hasPendingUserInput:
-                                  pendingUserInputByThreadId.get(thread.id) === true,
-                              })
-                            : null;
-                          const prStatus = thread
-                            ? prStatusIndicator(prByThreadId.get(thread.id) ?? null)
-                            : null;
-                          const terminalStatus = thread
-                            ? terminalStatusFromRunningIds(
-                                selectThreadTerminalState(terminalStateByThreadId, thread.id)
-                                  .runningTerminalIds,
-                              )
-                            : null;
-                          const createdAt =
-                            thread?.createdAt ?? draftThread?.createdAt ?? new Date().toISOString();
-
-                          return (
-                            <SidebarThreadRow
-                              key={tid}
-                              title={
-                                <span className="min-w-0 flex-1 truncate text-xs">
-                                  {thread?.title || "New thread"}
-                                </span>
-                              }
-                              titleSuffix={
-                                splitZoomed && isFocused ? (
-                                  <SearchIcon className="size-3 shrink-0 text-primary/60" />
-                                ) : undefined
-                              }
-                              threadStatus={threadStatus}
-                              terminalStatus={terminalStatus}
-                              prStatus={prStatus}
-                              isActive={isFocused}
-                              relativeTimeLabel={formatRelativeTime(createdAt)}
-                              onOpenPr={openPrLink}
-                              onClick={() => {
-                                if (leaf) {
-                                  setFocusedLeaf(leaf.id);
-                                }
-                              }}
-                              onKeyDown={(event) => {
-                                if (event.key !== "Enter" && event.key !== " ") return;
-                                event.preventDefault();
-                                if (leaf) {
-                                  setFocusedLeaf(leaf.id);
-                                }
-                              }}
-                              onContextMenu={(event) => {
-                                event.preventDefault();
-                                const api = readNativeApi();
-                                if (!api) return;
-                                void api.contextMenu
-                                  .show(
-                                    [
-                                      { id: "unsplit-all", label: "Unsplit all" },
-                                      ...(leaf
-                                        ? [{ id: "close-pane", label: "Close this pane" }]
-                                        : []),
-                                    ],
-                                    { x: event.clientX, y: event.clientY },
-                                  )
-                                  .then((clicked) => {
-                                    if (clicked === "unsplit-all") {
-                                      const threadIds = unsplit();
-                                      if (threadIds.length > 0) {
-                                        void navigate({
-                                          to: "/$threadId",
-                                          params: { threadId: threadIds[0]! },
-                                        });
-                                      }
-                                    } else if (clicked === "close-pane" && leaf) {
-                                      const remaining = closePane(leaf.id);
-                                      if (remaining) {
-                                        void navigate({
-                                          to: "/$threadId",
-                                          params: { threadId: remaining },
-                                        });
-                                      }
-                                    }
-                                  });
-                              }}
-                            />
-                          );
-                        })}
-                      </SidebarMenuSub>
-                    </CollapsibleContent>
-                  </Collapsible>
-                </SidebarMenuItem>
-              </SidebarMenu>
-            </div>
-          )}
 
           {shouldShowProjectPathEntry && (
             <div className="mb-2 px-1">
@@ -1758,7 +1934,8 @@ export default function Sidebar() {
                 {projects.map((project) => {
                   const projectThreads = threads
                     .filter(
-                      (thread) => thread.projectId === project.id && !splitThreadIds.has(thread.id),
+                      (thread) =>
+                        thread.projectId === project.id && !workspaceThreadIds.has(thread.id),
                     )
                     .toSorted((a, b) => {
                       const byDate =

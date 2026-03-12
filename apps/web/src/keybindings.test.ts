@@ -10,6 +10,7 @@ import {
   formatShortcutLabel,
   isChatNewShortcut,
   isChatNewLocalShortcut,
+  isChatReplaceFocusedPaneShortcut,
   isDiffToggleShortcut,
   isOpenFavoriteEditorShortcut,
   isTerminalClearShortcut,
@@ -118,6 +119,11 @@ const DEFAULT_BINDINGS = compile([
   { shortcut: shortcut("o", { ctrlKey: true, shiftKey: true }), command: "chat.splitRight" },
   { shortcut: shortcut("d", { metaKey: true, shiftKey: true }), command: "chat.splitDown" },
   { shortcut: shortcut("e", { ctrlKey: true, shiftKey: true }), command: "chat.splitDown" },
+  { shortcut: shortcut("d", { metaKey: true, altKey: true }), command: "chat.replaceFocusedPane" },
+  {
+    shortcut: shortcut("i", { ctrlKey: true, shiftKey: true }),
+    command: "chat.replaceFocusedPane",
+  },
   { shortcut: modShortcut("o"), command: "editor.openFavorite" },
 ]);
 
@@ -298,6 +304,27 @@ describe("chat/editor shortcuts", () => {
     );
   });
 
+  it("matches chat.replaceFocusedPane shortcut", () => {
+    assert.isTrue(
+      isChatReplaceFocusedPaneShortcut(
+        event({ key: "d", metaKey: true, altKey: true }),
+        DEFAULT_BINDINGS,
+        {
+          platform: "MacIntel",
+        },
+      ),
+    );
+    assert.isTrue(
+      isChatReplaceFocusedPaneShortcut(
+        event({ key: "i", ctrlKey: true, shiftKey: true }),
+        DEFAULT_BINDINGS,
+        {
+          platform: "Linux",
+        },
+      ),
+    );
+  });
+
   it("matches editor.openFavorite shortcut", () => {
     assert.isTrue(
       isOpenFavoriteEditorShortcut(event({ key: "o", metaKey: true }), DEFAULT_BINDINGS, {
@@ -340,6 +367,13 @@ describe("chat/editor shortcuts", () => {
         context: { terminalFocus: false },
       }),
       "chat.splitDown",
+    );
+    assert.strictEqual(
+      resolveShortcutCommand(event({ key: "d", metaKey: true, altKey: true }), DEFAULT_BINDINGS, {
+        platform: "MacIntel",
+        context: { terminalFocus: false },
+      }),
+      "chat.replaceFocusedPane",
     );
   });
 });

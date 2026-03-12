@@ -25,6 +25,7 @@ import {
   dropZoneToSplit,
   type DropZone,
   findLeaf,
+  findLeafByThreadId,
   firstLeaf,
 } from "../splitViewStore";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
@@ -334,8 +335,10 @@ function ChatThreadRouteView() {
 
   // Split view state
   const splitGroup = useSplitViewStore((s) => s.group);
+  const setFocusedLeaf = useSplitViewStore((s) => s.setFocusedLeaf);
   const splitThread = useSplitViewStore((s) => s.splitThread);
   const splitLeaf = useSplitViewStore((s) => s.splitLeaf);
+  const replaceThreadInLeaf = useSplitViewStore((s) => s.replaceThreadInLeaf);
   const reconcileThreads = useSplitViewStore((s) => s.reconcileThreads);
   const setProjectDraftThreadId = useComposerDraftStore((s) => s.setProjectDraftThreadId);
   const isSplitView = splitGroup !== null;
@@ -366,9 +369,26 @@ function ChatThreadRouteView() {
       projectId: string | null,
       zone: DropZone,
     ) => {
-      const { direction, insertBefore } = dropZoneToSplit(zone);
-
       if (droppedThreadId) {
+        if (zone === "center") {
+          if (!isSplitView) {
+            void navigate({
+              to: "/$threadId",
+              params: { threadId: droppedThreadId },
+            });
+            return;
+          }
+          const existingLeaf = splitGroup
+            ? findLeafByThreadId(splitGroup.root, droppedThreadId)
+            : null;
+          if (existingLeaf) {
+            setFocusedLeaf(existingLeaf.id);
+          } else {
+            replaceThreadInLeaf(leafId, droppedThreadId);
+          }
+          return;
+        }
+        const { direction, insertBefore } = dropZoneToSplit(zone);
         if (isSplitView) {
           splitLeaf(leafId, droppedThreadId, direction, insertBefore);
         } else {
@@ -376,6 +396,18 @@ function ChatThreadRouteView() {
         }
       } else if (projectId) {
         const tid = createProjectDraftThread(projectId as ProjectId);
+        if (zone === "center") {
+          if (isSplitView) {
+            replaceThreadInLeaf(leafId, tid);
+          } else {
+            void navigate({
+              to: "/$threadId",
+              params: { threadId: tid },
+            });
+          }
+          return;
+        }
+        const { direction, insertBefore } = dropZoneToSplit(zone);
         if (isSplitView) {
           splitLeaf(leafId, tid, direction, insertBefore);
         } else {
@@ -383,7 +415,17 @@ function ChatThreadRouteView() {
         }
       }
     },
-    [createProjectDraftThread, isSplitView, splitLeaf, splitThread, threadId],
+    [
+      createProjectDraftThread,
+      isSplitView,
+      navigate,
+      replaceThreadInLeaf,
+      setFocusedLeaf,
+      splitGroup,
+      splitLeaf,
+      splitThread,
+      threadId,
+    ],
   );
 
   /** Handle initial drop onto the single-thread view (not yet split). */
@@ -396,16 +438,30 @@ function ChatThreadRouteView() {
 
       const rect = e.currentTarget.getBoundingClientRect();
       const zone = computeClosestDropZone(e.clientX, e.clientY, rect);
-      const { direction, insertBefore } = dropZoneToSplit(zone);
-
       if (dragType === "project" && droppedProjectId) {
         const tid = createProjectDraftThread(droppedProjectId as ProjectId);
+        if (zone === "center") {
+          void navigate({
+            to: "/$threadId",
+            params: { threadId: tid },
+          });
+          return;
+        }
+        const { direction, insertBefore } = dropZoneToSplit(zone);
         splitThread(threadId, tid, direction, insertBefore);
       } else if (droppedThreadId && droppedThreadId !== threadId) {
+        if (zone === "center") {
+          void navigate({
+            to: "/$threadId",
+            params: { threadId: droppedThreadId as ThreadId },
+          });
+          return;
+        }
+        const { direction, insertBefore } = dropZoneToSplit(zone);
         splitThread(threadId, droppedThreadId as ThreadId, direction, insertBefore);
       }
     },
-    [createProjectDraftThread, splitThread, threadId],
+    [createProjectDraftThread, navigate, splitThread, threadId],
   );
 
   const availableThreadIds = useMemo(() => {

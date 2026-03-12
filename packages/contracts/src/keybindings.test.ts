@@ -52,6 +52,12 @@ it.effect("parses keybinding rules", () =>
       command: "chat.splitRight",
     });
     assert.strictEqual(parsedSplitRight.command, "chat.splitRight");
+
+    const parsedReplaceFocusedPane = yield* decode(KeybindingRule, {
+      key: "cmd+alt+d",
+      command: "chat.replaceFocusedPane",
+    });
+    assert.strictEqual(parsedReplaceFocusedPane.command, "chat.replaceFocusedPane");
   }),
 );
 

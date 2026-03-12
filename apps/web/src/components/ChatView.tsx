@@ -836,6 +836,18 @@ export default function ChatView({ threadId, onCloseSplitPane }: ChatViewProps) 
     ],
   );
 
+  const openReplaceFocusedPalette = useCallback(() => {
+    const splitStore = useSplitViewStore.getState();
+    if (!splitStore.group) {
+      return;
+    }
+    openCommandPalette({
+      mode: "replace-focused",
+      sourceThreadId: activeThreadId,
+      sourceLeafId: splitStore.group.focusedLeafId,
+    });
+  }, [activeThreadId, openCommandPalette]);
+
   const openPullRequestDialog = useCallback(
     (reference?: string) => {
       if (!canCheckoutPullRequestIntoThread) {
@@ -2530,6 +2542,13 @@ export default function ChatView({ threadId, onCloseSplitPane }: ChatViewProps) 
         return;
       }
 
+      if (command === "chat.replaceFocusedPane") {
+        event.preventDefault();
+        event.stopPropagation();
+        openReplaceFocusedPalette();
+        return;
+      }
+
       const scriptId = projectScriptIdFromCommand(command);
       if (!scriptId || !activeProject) return;
       const script = activeProject.scripts.find((entry) => entry.id === scriptId);
@@ -2551,6 +2570,7 @@ export default function ChatView({ threadId, onCloseSplitPane }: ChatViewProps) 
     isTerminalFocused,
     setTerminalOpen,
     openSplitCommandPalette,
+    openReplaceFocusedPalette,
     runProjectScript,
     splitTerminal,
     keybindings,

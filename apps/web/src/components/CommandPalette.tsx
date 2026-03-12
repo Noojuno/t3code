@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
-import { FolderIcon, MessageSquareIcon, PlusIcon } from "lucide-react";
+import { ColumnsIcon, FolderIcon, MessageSquareIcon, PlusIcon } from "lucide-react";
 import { type ProjectId, ThreadId } from "@t3tools/contracts";
 import {
   Command,
@@ -32,6 +32,7 @@ import type { Project, Thread } from "../types";
 
 type PaletteItem =
   | { kind: "new-thread"; project: Project }
+  | { kind: "workspace"; workspaceId: string; name: string; threadCount: number }
   | { kind: "thread"; thread: Thread; project: Project | undefined }
   | { kind: "project"; project: Project };
 
@@ -44,6 +45,8 @@ function paletteItemKey(item: PaletteItem): string {
   switch (item.kind) {
     case "new-thread":
       return `new-${item.project.id}`;
+    case "workspace":
+      return `workspace-${item.workspaceId}`;
     case "thread":
       return `thread-${item.thread.id}`;
     case "project":
@@ -55,6 +58,8 @@ function paletteItemSearchText(item: PaletteItem): string {
   switch (item.kind) {
     case "new-thread":
       return `new thread ${item.project.name} ${item.project.cwd}`;
+    case "workspace":
+      return `workspace ${item.name} ${item.threadCount}`;
     case "thread":
       return `${item.thread.title || "untitled thread"} ${item.project?.name ?? ""} ${item.project?.cwd ?? ""}`;
     case "project":
@@ -87,7 +92,10 @@ export function CommandPalette() {
     select: (params) => (params.threadId ? ThreadId.makeUnsafe(params.threadId) : null),
   });
   const splitGroup = useSplitViewStore((state) => state.group);
+  const workspaces = useSplitViewStore((state) => state.workspaces);
+  const activateWorkspace = useSplitViewStore((state) => state.activateWorkspace);
   const closePane = useSplitViewStore((state) => state.closePane);
+  const deactivateWorkspace = useSplitViewStore((state) => state.deactivateWorkspace);
   const splitThread = useSplitViewStore((state) => state.splitThread);
   const splitLeaf = useSplitViewStore((state) => state.splitLeaf);
   const replaceThreadInLeaf = useSplitViewStore((state) => state.replaceThreadInLeaf);
@@ -109,9 +117,21 @@ export function CommandPalette() {
 
   const itemGroups = useMemo(() => {
     const projectMap = new Map(projects.map((project) => [project.id, project]));
-    const openThreadIds = new Set<ThreadId>(
-      splitGroup ? collectThreadIds(splitGroup.root) : routeThreadId ? [routeThreadId] : [],
-    );
+    const openThreadIds = new Set<ThreadId>();
+    if (
+      paletteMode === "split-right" ||
+      paletteMode === "split-down" ||
+      paletteMode === "replace-focused"
+    ) {
+      const activeThreadIds = splitGroup
+        ? collectThreadIds(splitGroup.root)
+        : routeThreadId
+          ? [routeThreadId]
+          : [];
+      for (const threadId of activeThreadIds) {
+        openThreadIds.add(threadId);
+      }
+    }
 
     const newThreadItems: PaletteItem[] = projects
       .filter((project) => {
@@ -122,6 +142,16 @@ export function CommandPalette() {
         kind: "new-thread",
         project,
       }));
+
+    const workspaceItems: PaletteItem[] =
+      paletteMode === "split-right" || paletteMode === "split-down"
+        ? []
+        : workspaces.map((workspace) => ({
+            kind: "workspace",
+            workspaceId: workspace.id,
+            name: workspace.name,
+            threadCount: collectThreadIds(workspace.root).length,
+          }));
 
     const threadItems: PaletteItem[] = threads
       .filter((thread) => !openThreadIds.has(thread.id))
@@ -139,10 +169,19 @@ export function CommandPalette() {
 
     return [
       { label: "New Thread", items: newThreadItems },
+      { label: "Workspaces", items: workspaceItems },
       { label: "Threads", items: threadItems },
       { label: "Projects", items: projectItems },
     ];
-  }, [projectDraftThreadIdByProjectId, projects, routeThreadId, splitGroup, threads]);
+  }, [
+    paletteMode,
+    projectDraftThreadIdByProjectId,
+    projects,
+    routeThreadId,
+    splitGroup,
+    threads,
+    workspaces,
+  ]);
 
   const resetPalette = useCallback(() => {
     closePaletteStore();
@@ -277,16 +316,25 @@ export function CommandPalette() {
         return;
       }
 
-      if (splitGroup) {
+      if (paletteMode === "replace-focused" && splitGroup) {
         const existingLeaf = findLeafByThreadId(splitGroup.root, threadId);
         if (existingLeaf) {
           setFocusedLeaf(existingLeaf.id);
+          void navigate({
+            to: "/$threadId",
+            params: { threadId },
+          });
           return;
         }
         replaceThreadInFocusedLeaf(threadId);
+        void navigate({
+          to: "/$threadId",
+          params: { threadId },
+        });
         return;
       }
 
+      deactivateWorkspace();
       void navigate({
         to: "/$threadId",
         params: { threadId },
@@ -295,7 +343,9 @@ export function CommandPalette() {
     [
       clearDraftThread,
       closePane,
+      deactivateWorkspace,
       navigate,
+      paletteMode,
       previewLeafId,
       previewThreadId,
       replaceThreadInFocusedLeaf,
@@ -316,6 +366,19 @@ export function CommandPalette() {
       activateThread(threadId);
     },
     [activateThread],
+  );
+
+  const handleSelectWorkspace = useCallback(
+    (workspaceId: string) => {
+      resetPalette();
+      const focusedThreadId = activateWorkspace(workspaceId);
+      if (!focusedThreadId) return;
+      void navigate({
+        to: "/$threadId",
+        params: { threadId: focusedThreadId },
+      });
+    },
+    [activateWorkspace, navigate, resetPalette],
   );
 
   const handleNewThread = useCallback(
@@ -389,6 +452,9 @@ export function CommandPalette() {
         case "new-thread":
           handleNewThread(item.project.id);
           break;
+        case "workspace":
+          handleSelectWorkspace(item.workspaceId);
+          break;
         case "thread":
           handleSelectThread(item.thread.id);
           break;
@@ -397,7 +463,7 @@ export function CommandPalette() {
           break;
       }
     },
-    [handleNewThread, handleSelectProject, handleSelectThread],
+    [handleNewThread, handleSelectProject, handleSelectThread, handleSelectWorkspace],
   );
 
   return (
@@ -424,7 +490,9 @@ export function CommandPalette() {
                 ? "Split right with a thread or project…"
                 : paletteMode === "split-down"
                   ? "Split down with a thread or project…"
-                  : "Search threads and projects…"
+                  : paletteMode === "replace-focused"
+                    ? "Replace the focused pane with a thread or project…"
+                    : "Search threads and projects…"
             }
           />
           <CommandPanel
@@ -448,7 +516,7 @@ export function CommandPalette() {
             </span>
             <span>
               <kbd className="rounded border bg-muted px-1.5 py-0.5 text-[10px] font-medium">↵</kbd>{" "}
-              {splitDirection ? "split" : "select"}
+              {splitDirection ? "split" : paletteMode === "replace-focused" ? "replace" : "select"}
             </span>
             <span>
               <kbd className="rounded border bg-muted px-1.5 py-0.5 text-[10px] font-medium">
@@ -513,6 +581,18 @@ function PaletteItemContent({ item }: { item: PaletteItem }) {
                 {item.project.name}
               </span>
             )}
+          </div>
+        </>
+      );
+    case "workspace":
+      return (
+        <>
+          <ColumnsIcon className="mr-2 size-4 shrink-0 text-muted-foreground" />
+          <div className="min-w-0 flex-1">
+            <span className="block truncate">{item.name}</span>
+            <span className="block truncate text-xs text-muted-foreground">
+              {item.threadCount} {item.threadCount === 1 ? "thread" : "threads"}
+            </span>
           </div>
         </>
       );

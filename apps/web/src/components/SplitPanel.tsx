@@ -132,11 +132,16 @@ export function SplitDropPreview({
       {/* Content */}
       <div
         style={{ gridRow: 3, gridColumn: 3 }}
-        className={`flex min-h-0 min-w-0 overflow-hidden ${
+        className={`relative flex min-h-0 min-w-0 overflow-hidden ${
           zone ? "rounded-lg bg-background" : "rounded-[inherit]"
         }`}
       >
         {children}
+        {zone === "center" && (
+          <div className="absolute inset-0 p-2">
+            <SplitPlaceholder />
+          </div>
+        )}
       </div>
       {/* Right placeholder */}
       <div style={{ gridRow: 3, gridColumn: 5 }} className="min-h-0 min-w-0 overflow-hidden">

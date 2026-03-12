@@ -265,6 +265,16 @@ function EventRouter() {
         if (pathnameRef.current !== "/") {
           return;
         }
+        const persistedWorkspaceThreadId = useSplitViewStore.getState().getFocusedThreadId();
+        if (persistedWorkspaceThreadId) {
+          await navigate({
+            to: "/$threadId",
+            params: { threadId: persistedWorkspaceThreadId },
+            replace: true,
+          });
+          handledBootstrapThreadIdRef.current = payload.bootstrapThreadId;
+          return;
+        }
         if (handledBootstrapThreadIdRef.current === payload.bootstrapThreadId) {
           return;
         }

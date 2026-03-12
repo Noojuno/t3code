@@ -17,6 +17,7 @@ const STATIC_KEYBINDING_COMMANDS = [
   "chat.newLocal",
   "chat.splitRight",
   "chat.splitDown",
+  "chat.replaceFocusedPane",
   "editor.openFavorite",
 ] as const;
 
