@@ -158,12 +158,33 @@ export function shortcutLabelForCommand(
   command: KeybindingCommand,
   platform = navigator.platform,
 ): string | null {
+  let bestShortcut: KeybindingShortcut | null = null;
+  let bestScore = Number.NEGATIVE_INFINITY;
+
   for (let index = keybindings.length - 1; index >= 0; index -= 1) {
     const binding = keybindings[index];
     if (!binding || binding.command !== command) continue;
-    return formatShortcutLabel(binding.shortcut, platform);
+    const isMac = isMacPlatform(platform);
+    let score = 0;
+    if (binding.shortcut.modKey) {
+      score += 4;
+    }
+    if (isMac) {
+      if (binding.shortcut.metaKey) score += 3;
+      if (binding.shortcut.ctrlKey && !binding.shortcut.metaKey && !binding.shortcut.modKey) {
+        score -= 3;
+      }
+    } else {
+      if (binding.shortcut.ctrlKey) score += 3;
+      if (binding.shortcut.metaKey && !binding.shortcut.ctrlKey && !binding.shortcut.modKey) {
+        score -= 3;
+      }
+    }
+    if (score <= bestScore) continue;
+    bestScore = score;
+    bestShortcut = binding.shortcut;
   }
-  return null;
+  return bestShortcut ? formatShortcutLabel(bestShortcut, platform) : null;
 }
 
 export function isTerminalToggleShortcut(

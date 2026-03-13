@@ -28,12 +28,13 @@ interface ChatHeaderProps {
   diffToggleShortcutLabel: string | null;
   gitCwd: string | null;
   diffOpen: boolean;
+  enableOpenFavoriteShortcut?: boolean;
   onRunProjectScript: (script: ProjectScript) => void;
   onAddProjectScript: (input: NewProjectScriptInput) => Promise<void>;
   onUpdateProjectScript: (scriptId: string, input: NewProjectScriptInput) => Promise<void>;
   onDeleteProjectScript: (scriptId: string) => Promise<void>;
   onToggleDiff: () => void;
-  onCloseSplitPane: (() => void) | undefined;
+  onCloseSplitPane?: (() => void) | undefined;
 }
 
 export const ChatHeader = memo(function ChatHeader({
@@ -49,6 +50,7 @@ export const ChatHeader = memo(function ChatHeader({
   diffToggleShortcutLabel,
   gitCwd,
   diffOpen,
+  enableOpenFavoriteShortcut = true,
   onRunProjectScript,
   onAddProjectScript,
   onUpdateProjectScript,
@@ -94,6 +96,7 @@ export const ChatHeader = memo(function ChatHeader({
             keybindings={keybindings}
             availableEditors={availableEditors}
             openInCwd={openInCwd}
+            enableShortcut={enableOpenFavoriteShortcut}
           />
         )}
         {activeProjectName && <GitActionsControl gitCwd={gitCwd} activeThreadId={activeThreadId} />}

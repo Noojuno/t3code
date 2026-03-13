@@ -74,7 +74,7 @@ export const DEFAULT_KEYBINDINGS: ReadonlyArray<KeybindingRule> = [
   { key: "mod+shift+o", command: "chat.new", when: "!terminalFocus" },
   { key: "mod+shift+n", command: "chat.newLocal", when: "!terminalFocus" },
   { key: "cmd+d", command: "chat.splitRight", when: "!terminalFocus" },
-  { key: "ctrl+shift+o", command: "chat.splitRight", when: "!terminalFocus" },
+  { key: "ctrl+shift+d", command: "chat.splitRight", when: "!terminalFocus" },
   { key: "cmd+shift+d", command: "chat.splitDown", when: "!terminalFocus" },
   { key: "ctrl+shift+e", command: "chat.splitDown", when: "!terminalFocus" },
   { key: "cmd+alt+d", command: "chat.replaceFocusedPane", when: "!terminalFocus" },

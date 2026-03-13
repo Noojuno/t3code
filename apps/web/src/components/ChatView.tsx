@@ -263,7 +263,6 @@ export default function ChatView({ threadId, onCloseSplitPane }: ChatViewProps) 
   // When set, the thread-change reset effect will open the sidebar instead of closing it.
   // Used by "Implement in new thread" to carry the sidebar-open intent across navigation.
   const planSidebarOpenOnNextThreadRef = useRef(false);
-  const [nowTick, setNowTick] = useState(() => Date.now());
   const [composerHighlightedItemId, setComposerHighlightedItemId] = useState<string | null>(null);
   const [pullRequestDialogState, setPullRequestDialogState] =
     useState<PullRequestDialogState | null>(null);
@@ -630,7 +629,11 @@ export default function ChatView({ threadId, onCloseSplitPane }: ChatViewProps) 
   const isSendBusy = sendPhase !== "idle";
   const isPreparingWorktree = sendPhase === "preparing-worktree";
   const isWorking = phase === "running" || isSendBusy || isConnecting || isRevertingCheckpoint;
-  const nowIso = new Date(nowTick).toISOString();
+  const splitFocusedThreadId = useSplitViewStore((state) =>
+    state.group ? (findLeaf(state.group.root, state.group.focusedLeafId)?.threadId ?? null) : null,
+  );
+  const shouldHandlePaneKeyboardShortcuts =
+    splitFocusedThreadId === null || splitFocusedThreadId === activeThread?.id;
   const activeWorkStartedAt = deriveActiveWorkStartedAt(
     activeLatestTurn,
     activeThread?.session ?? null,
@@ -1957,16 +1960,6 @@ export default function ChatView({ threadId, onCloseSplitPane }: ChatViewProps) 
     : isLocalDraftThread
       ? (draftThread?.envMode ?? "local")
       : "local";
-
-  useEffect(() => {
-    if (phase !== "running") return;
-    const timer = window.setInterval(() => {
-      setNowTick(Date.now());
-    }, 1000);
-    return () => {
-      window.clearInterval(timer);
-    };
-  }, [phase]);
 
   const beginSendPhase = useCallback((nextPhase: Exclude<SendPhase, "idle">) => {
     setSendStartedAt((current) => current ?? new Date().toISOString());
@@ -3361,6 +3354,7 @@ export default function ChatView({ threadId, onCloseSplitPane }: ChatViewProps) 
           diffToggleShortcutLabel={diffPanelShortcutLabel}
           gitCwd={gitCwd}
           diffOpen={diffOpen}
+          enableOpenFavoriteShortcut={shouldHandlePaneKeyboardShortcuts}
           onRunProjectScript={(script) => {
             void runProjectScript(script);
           }}
@@ -3408,7 +3402,6 @@ export default function ChatView({ threadId, onCloseSplitPane }: ChatViewProps) 
               completionDividerBeforeEntryId={completionDividerBeforeEntryId}
               completionSummary={completionSummary}
               turnDiffSummaryByAssistantMessageId={turnDiffSummaryByAssistantMessageId}
-              nowIso={nowIso}
               expandedWorkGroups={expandedWorkGroups}
               onToggleWorkGroup={onToggleWorkGroup}
               onOpenTurnDiff={onOpenTurnDiff}
@@ -3453,6 +3446,7 @@ export default function ChatView({ threadId, onCloseSplitPane }: ChatViewProps) 
                       respondingRequestIds={respondingUserInputRequestIds}
                       answers={activePendingDraftAnswers}
                       questionIndex={activePendingQuestionIndex}
+                      enableKeyboardShortcuts={shouldHandlePaneKeyboardShortcuts}
                       onSelectOption={onSelectActivePendingUserInputOption}
                       onAdvance={onAdvanceActivePendingUserInput}
                     />

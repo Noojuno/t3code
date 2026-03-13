@@ -60,6 +60,7 @@ import { derivePendingApprovals, derivePendingUserInputs } from "../session-logi
 import { gitRemoveWorktreeMutationOptions, gitStatusQueryOptions } from "../lib/gitReactQuery";
 import { serverConfigQueryOptions } from "../lib/serverReactQuery";
 import { readNativeApi } from "../nativeApi";
+import { renameThreadTitle } from "../threadMeta";
 import { type DraftThreadEnvMode, useComposerDraftStore } from "../composerDraftStore";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { toastManager } from "./ui/toast";
@@ -783,18 +784,8 @@ export default function Sidebar() {
         finishRename();
         return;
       }
-      const api = readNativeApi();
-      if (!api) {
-        finishRename();
-        return;
-      }
       try {
-        await api.orchestration.dispatchCommand({
-          type: "thread.meta.update",
-          commandId: newCommandId(),
-          threadId,
-          title: trimmed,
-        });
+        await renameThreadTitle(threadId, trimmed);
       } catch (error) {
         toastManager.add({
           type: "error",
@@ -1596,13 +1587,13 @@ export default function Sidebar() {
             </Alert>
           </SidebarGroup>
         ) : null}
-        <SidebarGroup className="px-2 pt-2 pb-0">
-          <div className="mb-1 flex items-center justify-between px-2">
-            <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
-              Workspaces
-            </span>
-          </div>
-          {workspaces.length > 0 ? (
+        {workspaces.length > 0 ? (
+          <SidebarGroup className="px-2 pt-2 pb-0">
+            <div className="mb-1 flex items-center justify-between px-2">
+              <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
+                Workspaces
+              </span>
+            </div>
             <SidebarMenu>
               {workspaces.map((workspace) => {
                 const isExpanded = expandedWorkspaceIds.has(workspace.id);
@@ -1805,9 +1796,13 @@ export default function Sidebar() {
                                           params: { threadId: remaining },
                                         });
                                       } else {
+                                        const focusedThreadId = useSplitViewStore
+                                          .getState()
+                                          .getFocusedThreadId();
+                                        if (!focusedThreadId) return;
                                         void navigate({
                                           to: "/$threadId",
-                                          params: { threadId: tid },
+                                          params: { threadId: focusedThreadId },
                                         });
                                       }
                                     });
@@ -1822,10 +1817,8 @@ export default function Sidebar() {
                 );
               })}
             </SidebarMenu>
-          ) : (
-            <div className="px-2 pb-1 text-xs text-muted-foreground/60">No workspaces yet</div>
-          )}
-        </SidebarGroup>
+          </SidebarGroup>
+        ) : null}
         <SidebarGroup className="px-2 py-2">
           <div className="mb-1 flex items-center justify-between px-2">
             <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">

@@ -38,6 +38,8 @@ export interface Workspace {
   readonly id: string;
   /** Human-editable label shown in the sidebar. */
   readonly name: string;
+  /** Most recent time the workspace was activated or interacted with. */
+  readonly lastVisitedAt?: string;
   /** The root of the split tree. */
   readonly root: SplitNode;
   /** The id of the leaf that currently has focus. */
@@ -165,6 +167,7 @@ function pruneInvalidLeaves(
   const right = pruneInvalidLeaves(node.children[1], validThreadIds);
   if (left === null) return right;
   if (right === null) return left;
+  if (left === node.children[0] && right === node.children[1]) return node;
   return { ...node, children: [left, right] };
 }
 
@@ -342,6 +345,23 @@ function resolveActiveWorkspace(
   return workspaces.find((workspace) => workspace.id === requestedId) ?? null;
 }
 
+function findWorkspaceContainingThread(
+  workspaces: readonly Workspace[],
+  threadId: ThreadId,
+): Workspace | null {
+  return workspaces.find((workspace) => findLeafByThreadId(workspace.root, threadId)) ?? null;
+}
+
+function touchWorkspace(workspace: Workspace, lastVisitedAt = new Date().toISOString()): Workspace {
+  if (workspace.lastVisitedAt === lastVisitedAt) {
+    return workspace;
+  }
+  return {
+    ...workspace,
+    lastVisitedAt,
+  };
+}
+
 function buildNextWorkspaceName(workspaces: readonly Workspace[]): string {
   const prefix = "Workspace ";
   let maxOrdinal = 0;
@@ -438,8 +458,12 @@ function updateWorkspace(
       continue;
     }
     const updatedWorkspace = updater(workspace);
+    if (updatedWorkspace === workspace) {
+      next.push(workspace);
+      continue;
+    }
     changed = true;
-    if (updatedWorkspace) {
+    if (updatedWorkspace !== null) {
       next.push(updatedWorkspace);
     }
   }
@@ -513,6 +537,101 @@ export const useSplitViewStore = create<SplitViewStore>((set, get) => ({
     set((state) => {
       if (currentThreadId === newThreadId) return state;
 
+      const currentWorkspace = findWorkspaceContainingThread(state.workspaces, currentThreadId);
+      if (currentWorkspace) {
+        const currentLeaf = findLeafByThreadId(currentWorkspace.root, currentThreadId);
+        if (!currentLeaf) return state;
+
+        const existingLeaf = findLeafByThreadId(currentWorkspace.root, newThreadId);
+        if (existingLeaf) {
+          const updatedWorkspace = touchWorkspace({
+            ...currentWorkspace,
+            focusedLeafId: existingLeaf.id,
+          });
+          return {
+            ...withWorkspaceCollection(
+              updateWorkspace(state.workspaces, currentWorkspace.id, () => updatedWorkspace),
+              currentWorkspace.id,
+            ),
+            zoomed: false,
+            dragOver: null,
+          };
+        }
+
+        const existingWorkspaceForNewThread = findWorkspaceContainingThread(
+          state.workspaces,
+          newThreadId,
+        );
+        if (existingWorkspaceForNewThread) {
+          const targetLeaf = findLeafByThreadId(existingWorkspaceForNewThread.root, newThreadId);
+          if (!targetLeaf) return state;
+          const updatedWorkspace = touchWorkspace({
+            ...existingWorkspaceForNewThread,
+            focusedLeafId: targetLeaf.id,
+          });
+          return {
+            ...withWorkspaceCollection(
+              updateWorkspace(
+                state.workspaces,
+                existingWorkspaceForNewThread.id,
+                () => updatedWorkspace,
+              ),
+              existingWorkspaceForNewThread.id,
+            ),
+            zoomed: false,
+            dragOver: null,
+          };
+        }
+
+        const newRoot = splitLeafNode(
+          currentWorkspace.root,
+          currentLeaf.id,
+          newThreadId,
+          direction,
+          insertBefore,
+        );
+        if (!newRoot) return state;
+        const newLeaf = findLeafByThreadId(newRoot, newThreadId);
+        const updatedWorkspace = touchWorkspace({
+          ...currentWorkspace,
+          root: newRoot,
+          focusedLeafId: newLeaf?.id ?? currentWorkspace.focusedLeafId,
+        });
+        return {
+          ...withWorkspaceCollection(
+            updateWorkspace(state.workspaces, currentWorkspace.id, () => updatedWorkspace),
+            currentWorkspace.id,
+          ),
+          zoomed: false,
+          dragOver: null,
+        };
+      }
+
+      const existingWorkspaceForNewThread = findWorkspaceContainingThread(
+        state.workspaces,
+        newThreadId,
+      );
+      if (existingWorkspaceForNewThread) {
+        const targetLeaf = findLeafByThreadId(existingWorkspaceForNewThread.root, newThreadId);
+        if (!targetLeaf) return state;
+        const updatedWorkspace = touchWorkspace({
+          ...existingWorkspaceForNewThread,
+          focusedLeafId: targetLeaf.id,
+        });
+        return {
+          ...withWorkspaceCollection(
+            updateWorkspace(
+              state.workspaces,
+              existingWorkspaceForNewThread.id,
+              () => updatedWorkspace,
+            ),
+            existingWorkspaceForNewThread.id,
+          ),
+          zoomed: false,
+          dragOver: null,
+        };
+      }
+
       const existingLeaf: SplitLeaf = {
         type: "leaf",
         id: splitNodeId(),
@@ -535,6 +654,7 @@ export const useSplitViewStore = create<SplitViewStore>((set, get) => ({
       const workspace: Workspace = {
         id: root.id,
         name: buildNextWorkspaceName(state.workspaces),
+        lastVisitedAt: new Date().toISOString(),
         root,
         focusedLeafId: newLeaf.id,
       };
@@ -550,13 +670,44 @@ export const useSplitViewStore = create<SplitViewStore>((set, get) => ({
       if (!state.group) return state;
       const targetLeaf = findLeaf(state.group.root, leafId);
       if (!targetLeaf || targetLeaf.threadId === newThreadId) return state;
-      if (findLeafByThreadId(state.group.root, newThreadId)) return state;
+      const existingLeaf = findLeafByThreadId(state.group.root, newThreadId);
+      if (existingLeaf) {
+        const updatedWorkspace = touchWorkspace({
+          ...state.group,
+          focusedLeafId: existingLeaf.id,
+        });
+        return {
+          ...withWorkspaceCollection(
+            updateWorkspace(state.workspaces, state.group.id, () => updatedWorkspace),
+            state.group.id,
+          ),
+          zoomed: false,
+          dragOver: null,
+        };
+      }
+      const existingWorkspace = findWorkspaceContainingThread(state.workspaces, newThreadId);
+      if (existingWorkspace && existingWorkspace.id !== state.group.id) {
+        const targetWorkspaceLeaf = findLeafByThreadId(existingWorkspace.root, newThreadId);
+        if (!targetWorkspaceLeaf) return state;
+        const updatedWorkspace = touchWorkspace({
+          ...existingWorkspace,
+          focusedLeafId: targetWorkspaceLeaf.id,
+        });
+        return {
+          ...withWorkspaceCollection(
+            updateWorkspace(state.workspaces, existingWorkspace.id, () => updatedWorkspace),
+            existingWorkspace.id,
+          ),
+          zoomed: false,
+          dragOver: null,
+        };
+      }
 
       const newRoot = splitLeafNode(state.group.root, leafId, newThreadId, direction, insertBefore);
       if (!newRoot) return state;
       const newLeaf = findLeafByThreadId(newRoot, newThreadId);
       const updatedWorkspace: Workspace = {
-        ...state.group,
+        ...touchWorkspace(state.group),
         root: newRoot,
         focusedLeafId: newLeaf?.id ?? state.group.focusedLeafId,
       };
@@ -590,7 +741,7 @@ export const useSplitViewStore = create<SplitViewStore>((set, get) => ({
     const needNewFocus = state.group.focusedLeafId === leafId;
     const newFocused = needNewFocus ? firstLeaf(remaining).id : state.group.focusedLeafId;
     const updatedWorkspace: Workspace = {
-      ...state.group,
+      ...touchWorkspace(state.group),
       root: remaining,
       focusedLeafId: newFocused,
     };
@@ -640,12 +791,18 @@ export const useSplitViewStore = create<SplitViewStore>((set, get) => ({
     const state = get();
     const workspace = state.workspaces.find((entry) => entry.id === workspaceId) ?? null;
     if (!workspace) return null;
+    const lastVisitedAt = new Date().toISOString();
     set({
-      ...withWorkspaceCollection(state.workspaces, workspaceId),
+      ...withWorkspaceCollection(
+        updateWorkspace(state.workspaces, workspaceId, (entry) =>
+          touchWorkspace(entry, lastVisitedAt),
+        ),
+        workspaceId,
+      ),
       zoomed: false,
       dragOver: null,
     });
-    return workspaceFocusedThreadId(workspace);
+    return workspaceFocusedThreadId(touchWorkspace(workspace, lastVisitedAt));
   },
 
   deactivateWorkspace: () => {
@@ -662,7 +819,10 @@ export const useSplitViewStore = create<SplitViewStore>((set, get) => ({
   setFocusedLeaf: (leafId) => {
     set((state) => {
       if (!state.group || state.group.focusedLeafId === leafId) return state;
-      const updatedWorkspace: Workspace = { ...state.group, focusedLeafId: leafId };
+      const updatedWorkspace: Workspace = {
+        ...touchWorkspace(state.group),
+        focusedLeafId: leafId,
+      };
       return {
         ...withWorkspaceCollection(
           updateWorkspace(state.workspaces, state.group.id, () => updatedWorkspace),
@@ -677,7 +837,7 @@ export const useSplitViewStore = create<SplitViewStore>((set, get) => ({
       if (!state.group) return state;
       const newRoot = updateBranchRatio(state.group.root, branchId, ratio);
       if (!newRoot) return state;
-      const updatedWorkspace: Workspace = { ...state.group, root: newRoot };
+      const updatedWorkspace: Workspace = { ...touchWorkspace(state.group), root: newRoot };
       return {
         ...withWorkspaceCollection(
           updateWorkspace(state.workspaces, state.group.id, () => updatedWorkspace),
@@ -691,10 +851,40 @@ export const useSplitViewStore = create<SplitViewStore>((set, get) => ({
     set((state) => {
       if (!state.group) return state;
       const existing = findLeafByThreadId(state.group.root, newThreadId);
-      if (existing && existing.id !== state.group.focusedLeafId) return state;
+      if (existing && existing.id !== state.group.focusedLeafId) {
+        const updatedWorkspace = touchWorkspace({
+          ...state.group,
+          focusedLeafId: existing.id,
+        });
+        return {
+          ...withWorkspaceCollection(
+            updateWorkspace(state.workspaces, state.group.id, () => updatedWorkspace),
+            state.group.id,
+          ),
+          zoomed: false,
+          dragOver: null,
+        };
+      }
+      const existingWorkspace = findWorkspaceContainingThread(state.workspaces, newThreadId);
+      if (existingWorkspace && existingWorkspace.id !== state.group.id) {
+        const targetLeaf = findLeafByThreadId(existingWorkspace.root, newThreadId);
+        if (!targetLeaf) return state;
+        const updatedWorkspace = touchWorkspace({
+          ...existingWorkspace,
+          focusedLeafId: targetLeaf.id,
+        });
+        return {
+          ...withWorkspaceCollection(
+            updateWorkspace(state.workspaces, existingWorkspace.id, () => updatedWorkspace),
+            existingWorkspace.id,
+          ),
+          zoomed: false,
+          dragOver: null,
+        };
+      }
       const newRoot = replaceLeafThread(state.group.root, state.group.focusedLeafId, newThreadId);
       if (!newRoot) return state;
-      const updatedWorkspace: Workspace = { ...state.group, root: newRoot };
+      const updatedWorkspace: Workspace = { ...touchWorkspace(state.group), root: newRoot };
       return {
         ...withWorkspaceCollection(
           updateWorkspace(state.workspaces, state.group.id, () => updatedWorkspace),
@@ -708,10 +898,40 @@ export const useSplitViewStore = create<SplitViewStore>((set, get) => ({
     set((state) => {
       if (!state.group) return state;
       const existing = findLeafByThreadId(state.group.root, newThreadId);
-      if (existing && existing.id !== leafId) return state;
+      if (existing && existing.id !== leafId) {
+        const updatedWorkspace = touchWorkspace({
+          ...state.group,
+          focusedLeafId: existing.id,
+        });
+        return {
+          ...withWorkspaceCollection(
+            updateWorkspace(state.workspaces, state.group.id, () => updatedWorkspace),
+            state.group.id,
+          ),
+          zoomed: false,
+          dragOver: null,
+        };
+      }
+      const existingWorkspace = findWorkspaceContainingThread(state.workspaces, newThreadId);
+      if (existingWorkspace && existingWorkspace.id !== state.group.id) {
+        const targetLeaf = findLeafByThreadId(existingWorkspace.root, newThreadId);
+        if (!targetLeaf) return state;
+        const updatedWorkspace = touchWorkspace({
+          ...existingWorkspace,
+          focusedLeafId: targetLeaf.id,
+        });
+        return {
+          ...withWorkspaceCollection(
+            updateWorkspace(state.workspaces, existingWorkspace.id, () => updatedWorkspace),
+            existingWorkspace.id,
+          ),
+          zoomed: false,
+          dragOver: null,
+        };
+      }
       const newRoot = replaceLeafThread(state.group.root, leafId, newThreadId);
       if (!newRoot) return state;
-      const updatedWorkspace: Workspace = { ...state.group, root: newRoot };
+      const updatedWorkspace: Workspace = { ...touchWorkspace(state.group), root: newRoot };
       return {
         ...withWorkspaceCollection(
           updateWorkspace(state.workspaces, state.group.id, () => updatedWorkspace),
@@ -756,7 +976,10 @@ export const useSplitViewStore = create<SplitViewStore>((set, get) => ({
     if (!state.group) return null;
     const target = findLeafInDirection(state.group.root, state.group.focusedLeafId, direction);
     if (!target) return null;
-    const updatedWorkspace: Workspace = { ...state.group, focusedLeafId: target.id };
+    const updatedWorkspace: Workspace = {
+      ...touchWorkspace(state.group),
+      focusedLeafId: target.id,
+    };
     set({
       ...withWorkspaceCollection(
         updateWorkspace(state.workspaces, state.group.id, () => updatedWorkspace),
@@ -788,19 +1011,25 @@ export const useSplitViewStore = create<SplitViewStore>((set, get) => ({
 
     let activeFallbackThreadId: ThreadId | null = null;
     const nextWorkspaces: Workspace[] = [];
+    let changed = false;
 
     for (const workspace of state.workspaces) {
       const nextRoot = pruneInvalidLeaves(workspace.root, validThreadIds);
       if (!nextRoot) {
+        changed = true;
         continue;
       }
       if (nextRoot.type === "leaf") {
         if (workspace.id === state.activeWorkspaceId) {
           activeFallbackThreadId = nextRoot.threadId;
         }
+        changed = true;
         continue;
       }
       const focusedLeaf = findLeaf(nextRoot, workspace.focusedLeafId) ?? firstLeaf(nextRoot);
+      if (nextRoot !== workspace.root || focusedLeaf.id !== workspace.focusedLeafId) {
+        changed = true;
+      }
       nextWorkspaces.push({
         ...workspace,
         root: nextRoot,
@@ -809,6 +1038,12 @@ export const useSplitViewStore = create<SplitViewStore>((set, get) => ({
     }
 
     const nextActiveWorkspace = resolveActiveWorkspace(nextWorkspaces, state.activeWorkspaceId);
+    if (!changed && nextActiveWorkspace?.id === state.activeWorkspaceId) {
+      return nextActiveWorkspace
+        ? workspaceFocusedThreadId(nextActiveWorkspace)
+        : activeFallbackThreadId;
+    }
+
     set({
       ...withWorkspaceCollection(nextWorkspaces, nextActiveWorkspace?.id ?? null),
       zoomed: false,

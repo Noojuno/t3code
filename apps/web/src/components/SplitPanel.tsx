@@ -164,6 +164,7 @@ interface LeafPaneProps {
   showDropZones: boolean;
   renderThread: (threadId: ThreadId, leafId: string) => ReactNode;
   onSplitDrop: SplitDropHandler | undefined;
+  onFocusThread: ((threadId: ThreadId) => void) | undefined;
 }
 
 function LeafPane({
@@ -173,12 +174,14 @@ function LeafPane({
   showDropZones,
   renderThread,
   onSplitDrop,
+  onFocusThread,
 }: LeafPaneProps) {
   const setFocusedLeaf = useSplitViewStore((s) => s.setFocusedLeaf);
   const setDragOver = useSplitViewStore((s) => s.setDragOver);
-  const dragOver = useSplitViewStore((s) => s.dragOver);
   const clearDragOver = useSplitViewStore((s) => s.clearDragOver);
-  const activeZone = dragOver?.leafId === leaf.id ? dragOver.zone : null;
+  const activeZone = useSplitViewStore((s) =>
+    s.dragOver?.leafId === leaf.id ? s.dragOver.zone : null,
+  );
 
   return (
     <div
@@ -191,8 +194,14 @@ function LeafPane({
             ? "ring-2 ring-primary/30 ring-inset opacity-100"
             : "opacity-60"
       }`}
-      onMouseDown={() => setFocusedLeaf(leaf.id)}
-      onFocus={() => setFocusedLeaf(leaf.id)}
+      onMouseDown={() => {
+        setFocusedLeaf(leaf.id);
+        onFocusThread?.(leaf.threadId);
+      }}
+      onFocus={() => {
+        setFocusedLeaf(leaf.id);
+        onFocusThread?.(leaf.threadId);
+      }}
       onDragOver={(e) => {
         e.preventDefault();
       }}
@@ -249,6 +258,7 @@ interface BranchPaneProps {
   showDropZones: boolean;
   renderThread: (threadId: ThreadId, leafId: string) => ReactNode;
   onSplitDrop: SplitDropHandler | undefined;
+  onFocusThread: ((threadId: ThreadId) => void) | undefined;
 }
 
 function BranchPane({
@@ -257,6 +267,7 @@ function BranchPane({
   showDropZones,
   renderThread,
   onSplitDrop,
+  onFocusThread,
 }: BranchPaneProps) {
   const isHorizontal = branch.direction === "horizontal";
   const firstBasis = `calc(${(branch.ratio * 100).toFixed(4)}% - ${(SPLIT_GAP_PX * branch.ratio).toFixed(4)}px)`;
@@ -278,6 +289,7 @@ function BranchPane({
           showDropZones={showDropZones}
           renderThread={renderThread}
           onSplitDrop={onSplitDrop}
+          onFocusThread={onFocusThread}
         />
       </div>
       <ResizeHandle branchId={branch.id} direction={branch.direction} />
@@ -295,6 +307,7 @@ function BranchPane({
           showDropZones={showDropZones}
           renderThread={renderThread}
           onSplitDrop={onSplitDrop}
+          onFocusThread={onFocusThread}
         />
       </div>
     </div>
@@ -309,6 +322,7 @@ interface SplitPanelNodeProps {
   showDropZones: boolean;
   renderThread: (threadId: ThreadId, leafId: string) => ReactNode;
   onSplitDrop: SplitDropHandler | undefined;
+  onFocusThread: ((threadId: ThreadId) => void) | undefined;
 }
 
 function SplitPanelNode({
@@ -317,6 +331,7 @@ function SplitPanelNode({
   showDropZones,
   renderThread,
   onSplitDrop,
+  onFocusThread,
 }: SplitPanelNodeProps) {
   if (node.type === "leaf") {
     return (
@@ -327,6 +342,7 @@ function SplitPanelNode({
         showDropZones={showDropZones}
         renderThread={renderThread}
         onSplitDrop={onSplitDrop}
+        onFocusThread={onFocusThread}
       />
     );
   }
@@ -337,6 +353,7 @@ function SplitPanelNode({
       showDropZones={showDropZones}
       renderThread={renderThread}
       onSplitDrop={onSplitDrop}
+      onFocusThread={onFocusThread}
     />
   );
 }
@@ -350,9 +367,10 @@ export interface SplitPanelRootProps {
    * threadId is null when a project (not thread) is dragged (caller should create a new thread).
    */
   onSplitDrop: SplitDropHandler | undefined;
+  onFocusThread?: (threadId: ThreadId) => void;
 }
 
-export function SplitPanelRoot({ renderThread, onSplitDrop }: SplitPanelRootProps) {
+export function SplitPanelRoot({ renderThread, onSplitDrop, onFocusThread }: SplitPanelRootProps) {
   const group = useSplitViewStore((s) => s.group);
   const zoomed = useSplitViewStore((s) => s.zoomed);
   const [showDropZones, setShowDropZones] = useState(false);
@@ -399,6 +417,7 @@ export function SplitPanelRoot({ renderThread, onSplitDrop }: SplitPanelRootProp
           showDropZones={showDropZones}
           renderThread={renderThread}
           onSplitDrop={onSplitDrop}
+          onFocusThread={onFocusThread}
         />
       ) : (
         <SplitPanelNode
@@ -407,6 +426,7 @@ export function SplitPanelRoot({ renderThread, onSplitDrop }: SplitPanelRootProp
           showDropZones={showDropZones}
           renderThread={renderThread}
           onSplitDrop={onSplitDrop}
+          onFocusThread={onFocusThread}
         />
       )}
     </div>

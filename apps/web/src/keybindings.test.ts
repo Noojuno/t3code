@@ -99,7 +99,7 @@ const DEFAULT_BINDINGS = compile([
     whenAst: whenIdentifier("terminalFocus"),
   },
   {
-    shortcut: modShortcut("d", { shiftKey: true }),
+    shortcut: modShortcut("n"),
     command: "terminal.new",
     whenAst: whenIdentifier("terminalFocus"),
   },
@@ -115,14 +115,35 @@ const DEFAULT_BINDINGS = compile([
   },
   { shortcut: modShortcut("o", { shiftKey: true }), command: "chat.new" },
   { shortcut: modShortcut("n", { shiftKey: true }), command: "chat.newLocal" },
-  { shortcut: shortcut("d", { metaKey: true }), command: "chat.splitRight" },
-  { shortcut: shortcut("o", { ctrlKey: true, shiftKey: true }), command: "chat.splitRight" },
-  { shortcut: shortcut("d", { metaKey: true, shiftKey: true }), command: "chat.splitDown" },
-  { shortcut: shortcut("e", { ctrlKey: true, shiftKey: true }), command: "chat.splitDown" },
-  { shortcut: shortcut("d", { metaKey: true, altKey: true }), command: "chat.replaceFocusedPane" },
+  {
+    shortcut: shortcut("d", { metaKey: true }),
+    command: "chat.splitRight",
+    whenAst: whenNot(whenIdentifier("terminalFocus")),
+  },
+  {
+    shortcut: shortcut("d", { ctrlKey: true, shiftKey: true }),
+    command: "chat.splitRight",
+    whenAst: whenNot(whenIdentifier("terminalFocus")),
+  },
+  {
+    shortcut: shortcut("d", { metaKey: true, shiftKey: true }),
+    command: "chat.splitDown",
+    whenAst: whenNot(whenIdentifier("terminalFocus")),
+  },
+  {
+    shortcut: shortcut("e", { ctrlKey: true, shiftKey: true }),
+    command: "chat.splitDown",
+    whenAst: whenNot(whenIdentifier("terminalFocus")),
+  },
+  {
+    shortcut: shortcut("d", { metaKey: true, altKey: true }),
+    command: "chat.replaceFocusedPane",
+    whenAst: whenNot(whenIdentifier("terminalFocus")),
+  },
   {
     shortcut: shortcut("i", { ctrlKey: true, shiftKey: true }),
     command: "chat.replaceFocusedPane",
+    whenAst: whenNot(whenIdentifier("terminalFocus")),
   },
   { shortcut: modShortcut("o"), command: "editor.openFavorite" },
 ]);
@@ -152,7 +173,7 @@ describe("split/new/close terminal shortcuts", () => {
       }),
     );
     assert.isFalse(
-      isTerminalNewShortcut(event({ key: "d", ctrlKey: true, shiftKey: true }), DEFAULT_BINDINGS, {
+      isTerminalNewShortcut(event({ key: "n", ctrlKey: true }), DEFAULT_BINDINGS, {
         platform: "Linux",
         context: { terminalFocus: false },
       }),
@@ -173,7 +194,7 @@ describe("split/new/close terminal shortcuts", () => {
       }),
     );
     assert.isTrue(
-      isTerminalNewShortcut(event({ key: "d", ctrlKey: true, shiftKey: true }), DEFAULT_BINDINGS, {
+      isTerminalNewShortcut(event({ key: "n", ctrlKey: true }), DEFAULT_BINDINGS, {
         platform: "Linux",
         context: { terminalFocus: true },
       }),

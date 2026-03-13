@@ -13,6 +13,7 @@ interface PendingUserInputPanelProps {
   respondingRequestIds: ApprovalRequestId[];
   answers: Record<string, PendingUserInputDraftAnswer>;
   questionIndex: number;
+  enableKeyboardShortcuts?: boolean;
   onSelectOption: (questionId: string, optionLabel: string) => void;
   onAdvance: () => void;
 }
@@ -22,6 +23,7 @@ export const ComposerPendingUserInputPanel = memo(function ComposerPendingUserIn
   respondingRequestIds,
   answers,
   questionIndex,
+  enableKeyboardShortcuts = true,
   onSelectOption,
   onAdvance,
 }: PendingUserInputPanelProps) {
@@ -36,6 +38,7 @@ export const ComposerPendingUserInputPanel = memo(function ComposerPendingUserIn
       isResponding={respondingRequestIds.includes(activePrompt.requestId)}
       answers={answers}
       questionIndex={questionIndex}
+      enableKeyboardShortcuts={enableKeyboardShortcuts}
       onSelectOption={onSelectOption}
       onAdvance={onAdvance}
     />
@@ -47,6 +50,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   isResponding,
   answers,
   questionIndex,
+  enableKeyboardShortcuts,
   onSelectOption,
   onAdvance,
 }: {
@@ -54,6 +58,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   isResponding: boolean;
   answers: Record<string, PendingUserInputDraftAnswer>;
   questionIndex: number;
+  enableKeyboardShortcuts: boolean;
   onSelectOption: (questionId: string, optionLabel: string) => void;
   onAdvance: () => void;
 }) {
@@ -89,6 +94,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   // doubles as a custom-answer field during user input, and when it's empty the digit
   // keys should pick options instead of typing into the editor.
   useEffect(() => {
+    if (!enableKeyboardShortcuts) return;
     if (!activeQuestion || isResponding) return;
     const handler = (event: globalThis.KeyboardEvent) => {
       if (event.metaKey || event.ctrlKey || event.altKey) return;
@@ -113,7 +119,13 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [activeQuestion, isResponding, selectOptionAndAutoAdvance, progress.customAnswer.length]);
+  }, [
+    activeQuestion,
+    enableKeyboardShortcuts,
+    isResponding,
+    progress.customAnswer.length,
+    selectOptionAndAutoAdvance,
+  ]);
 
   if (!activeQuestion) {
     return null;

@@ -335,6 +335,8 @@ function ChatThreadRouteView() {
 
   // Split view state
   const splitGroup = useSplitViewStore((s) => s.group);
+  const workspaces = useSplitViewStore((s) => s.workspaces);
+  const activateWorkspace = useSplitViewStore((s) => s.activateWorkspace);
   const setFocusedLeaf = useSplitViewStore((s) => s.setFocusedLeaf);
   const splitThread = useSplitViewStore((s) => s.splitThread);
   const splitLeaf = useSplitViewStore((s) => s.splitLeaf);
@@ -370,6 +372,23 @@ function ChatThreadRouteView() {
       zone: DropZone,
     ) => {
       if (droppedThreadId) {
+        const workspaceWithThread = workspaces.find((workspace) =>
+          findLeafByThreadId(workspace.root, droppedThreadId),
+        );
+        const existingWorkspaceLeaf = workspaceWithThread
+          ? findLeafByThreadId(workspaceWithThread.root, droppedThreadId)
+          : null;
+
+        if (workspaceWithThread && existingWorkspaceLeaf) {
+          activateWorkspace(workspaceWithThread.id);
+          setFocusedLeaf(existingWorkspaceLeaf.id);
+          void navigate({
+            to: "/$threadId",
+            params: { threadId: droppedThreadId },
+          });
+          return;
+        }
+
         if (zone === "center") {
           if (!isSplitView) {
             void navigate({
@@ -416,6 +435,7 @@ function ChatThreadRouteView() {
       }
     },
     [
+      activateWorkspace,
       createProjectDraftThread,
       isSplitView,
       navigate,
@@ -425,6 +445,7 @@ function ChatThreadRouteView() {
       splitLeaf,
       splitThread,
       threadId,
+      workspaces,
     ],
   );
 
@@ -450,6 +471,21 @@ function ChatThreadRouteView() {
         const { direction, insertBefore } = dropZoneToSplit(zone);
         splitThread(threadId, tid, direction, insertBefore);
       } else if (droppedThreadId && droppedThreadId !== threadId) {
+        const workspaceWithThread = workspaces.find((workspace) =>
+          findLeafByThreadId(workspace.root, droppedThreadId as ThreadId),
+        );
+        const existingWorkspaceLeaf = workspaceWithThread
+          ? findLeafByThreadId(workspaceWithThread.root, droppedThreadId as ThreadId)
+          : null;
+        if (workspaceWithThread && existingWorkspaceLeaf) {
+          activateWorkspace(workspaceWithThread.id);
+          setFocusedLeaf(existingWorkspaceLeaf.id);
+          void navigate({
+            to: "/$threadId",
+            params: { threadId: droppedThreadId as ThreadId },
+          });
+          return;
+        }
         if (zone === "center") {
           void navigate({
             to: "/$threadId",
@@ -461,7 +497,15 @@ function ChatThreadRouteView() {
         splitThread(threadId, droppedThreadId as ThreadId, direction, insertBefore);
       }
     },
-    [createProjectDraftThread, navigate, splitThread, threadId],
+    [
+      activateWorkspace,
+      createProjectDraftThread,
+      navigate,
+      setFocusedLeaf,
+      splitThread,
+      threadId,
+      workspaces,
+    ],
   );
 
   const availableThreadIds = useMemo(() => {
@@ -501,6 +545,19 @@ function ChatThreadRouteView() {
       },
     });
   }, [focusedThreadId, navigate]);
+
+  const focusSplitThread = useCallback(
+    (focusedLeafThreadId: ThreadId) => {
+      if (focusedLeafThreadId === threadId) return;
+      void navigate({
+        to: "/$threadId",
+        params: { threadId: focusedLeafThreadId },
+        replace: true,
+        search: (previous) => previous,
+      });
+    },
+    [navigate, threadId],
+  );
 
   useEffect(() => {
     if (!threadsHydrated) {
@@ -597,7 +654,11 @@ function ChatThreadRouteView() {
       <div className="flex h-dvh w-full min-h-0 min-w-0 flex-col overflow-hidden">
         <div className="flex min-h-0 flex-1 overflow-hidden">
           <SidebarInset className="min-h-0 flex-1 overflow-hidden overscroll-y-none bg-muted py-3 pl-2 pr-3 text-foreground dark:bg-card">
-            <SplitPanelRoot renderThread={renderThread} onSplitDrop={handleSplitDrop} />
+            <SplitPanelRoot
+              renderThread={renderThread}
+              onSplitDrop={handleSplitDrop}
+              onFocusThread={focusSplitThread}
+            />
           </SidebarInset>
           {!shouldUseDiffSheet && (
             <DiffPanelInlineSidebar

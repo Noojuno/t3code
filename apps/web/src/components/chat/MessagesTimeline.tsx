@@ -33,7 +33,6 @@ interface MessagesTimelineProps {
   completionDividerBeforeEntryId: string | null;
   completionSummary: string | null;
   turnDiffSummaryByAssistantMessageId: Map<MessageId, TurnDiffSummary>;
-  nowIso: string;
   expandedWorkGroups: Record<string, boolean>;
   onToggleWorkGroup: (groupId: string) => void;
   onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
@@ -56,7 +55,6 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   completionDividerBeforeEntryId,
   completionSummary,
   turnDiffSummaryByAssistantMessageId,
-  nowIso,
   expandedWorkGroups,
   onToggleWorkGroup,
   onOpenTurnDiff,
@@ -503,14 +501,11 @@ export const MessagesTimeline = memo(function MessagesTimeline({
                     </div>
                   );
                 })()}
-                <p className="mt-1.5 text-[10px] text-muted-foreground/30">
-                  {formatMessageMeta(
-                    row.message.createdAt,
-                    row.message.streaming
-                      ? formatElapsed(row.message.createdAt, nowIso)
-                      : formatElapsed(row.message.createdAt, row.message.completedAt),
-                  )}
-                </p>
+                <TimelineMessageMeta
+                  createdAt={row.message.createdAt}
+                  completedAt={row.message.completedAt}
+                  isStreaming={Boolean(row.message.streaming)}
+                />
               </div>
             </>
           );
@@ -534,11 +529,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
               <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-pulse [animation-delay:200ms]" />
               <span className="h-1 w-1 rounded-full bg-muted-foreground/30 animate-pulse [animation-delay:400ms]" />
             </span>
-            <span>
-              {row.createdAt
-                ? `Working for ${formatWorkingTimer(row.createdAt, nowIso) ?? "0s"}`
-                : "Working..."}
-            </span>
+            <WorkingIndicatorLabel createdAt={row.createdAt} />
           </div>
         </div>
       )}
@@ -619,6 +610,55 @@ function estimateTimelineProposedPlanHeight(proposedPlan: TimelineProposedPlan):
   const estimatedLines = Math.max(1, Math.ceil(proposedPlan.planMarkdown.length / 72));
   return 120 + Math.min(estimatedLines * 22, 880);
 }
+
+function useLiveNowIso(enabled: boolean): string {
+  const [nowIso, setNowIso] = useState(() => new Date().toISOString());
+
+  useEffect(() => {
+    if (!enabled) return;
+    const timer = window.setInterval(() => {
+      setNowIso(new Date().toISOString());
+    }, 1000);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [enabled]);
+
+  return nowIso;
+}
+
+const TimelineMessageMeta = memo(function TimelineMessageMeta({
+  createdAt,
+  completedAt,
+  isStreaming,
+}: {
+  createdAt: string;
+  completedAt: string | null | undefined;
+  isStreaming: boolean;
+}) {
+  const nowIso = useLiveNowIso(isStreaming);
+  const duration = isStreaming
+    ? formatElapsed(createdAt, nowIso)
+    : formatElapsed(createdAt, completedAt ?? undefined);
+
+  return (
+    <p className="mt-1.5 text-[10px] text-muted-foreground/30">
+      {formatMessageMeta(createdAt, duration)}
+    </p>
+  );
+});
+
+const WorkingIndicatorLabel = memo(function WorkingIndicatorLabel({
+  createdAt,
+}: {
+  createdAt: string | null;
+}) {
+  const nowIso = useLiveNowIso(createdAt !== null);
+  if (!createdAt) {
+    return <span>Working...</span>;
+  }
+  return <span>{`Working for ${formatWorkingTimer(createdAt, nowIso) ?? "0s"}`}</span>;
+});
 
 function formatWorkingTimer(startIso: string, endIso: string): string | null {
   const startedAtMs = Date.parse(startIso);

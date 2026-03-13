@@ -15,10 +15,12 @@ export const OpenInPicker = memo(function OpenInPicker({
   keybindings,
   availableEditors,
   openInCwd,
+  enableShortcut = true,
 }: {
   keybindings: ResolvedKeybindingsConfig;
   availableEditors: ReadonlyArray<EditorId>;
   openInCwd: string | null;
+  enableShortcut?: boolean;
 }) {
   const [lastEditor, setLastEditor] = useState<EditorId>(() => {
     const stored = localStorage.getItem(LAST_EDITOR_KEY);
@@ -83,6 +85,7 @@ export const OpenInPicker = memo(function OpenInPicker({
   );
 
   useEffect(() => {
+    if (!enableShortcut) return;
     const handler = (e: globalThis.KeyboardEvent) => {
       const api = readNativeApi();
       if (!isOpenFavoriteEditorShortcut(e, keybindings)) return;
@@ -94,7 +97,7 @@ export const OpenInPicker = memo(function OpenInPicker({
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [effectiveEditor, keybindings, openInCwd]);
+  }, [effectiveEditor, enableShortcut, keybindings, openInCwd]);
 
   return (
     <Group aria-label="Subscription actions">
