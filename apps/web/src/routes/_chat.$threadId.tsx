@@ -4,6 +4,13 @@ import { createFileRoute, retainSearchParams, useNavigate } from "@tanstack/reac
 import { Suspense, lazy, useState, useMemo, type ReactNode, useCallback, useEffect } from "react";
 
 import ChatView from "../components/ChatView";
+import { DiffWorkerPoolProvider } from "../components/DiffWorkerPoolProvider";
+import {
+  DiffPanelHeaderSkeleton,
+  DiffPanelLoadingState,
+  DiffPanelShell,
+  type DiffPanelMode,
+} from "../components/DiffPanelShell";
 import ThreadTerminalDrawer from "../components/ThreadTerminalDrawer";
 import { SplitPanelRoot, SplitDropPreview, SplitPlaceholder } from "../components/SplitPanel";
 import { useComposerDraftStore } from "../composerDraftStore";
@@ -29,7 +36,7 @@ import {
   firstLeaf,
 } from "../splitViewStore";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
-import { MAX_THREAD_TERMINAL_COUNT } from "../types";
+import { MAX_TERMINALS_PER_GROUP } from "../types";
 import { newThreadId, randomUUID } from "../lib/utils";
 import { closeTerminalSession } from "../lib/closeTerminalSession";
 import { Sheet, SheetPopup } from "../components/ui/sheet";
@@ -68,19 +75,21 @@ const DiffPanelSheet = (props: {
   );
 };
 
-const DiffLoadingFallback = (props: { inline: boolean }) => {
-  if (props.inline) {
-    return (
-      <div className="flex h-full min-h-0 items-center justify-center px-4 text-center text-xs text-muted-foreground/70">
-        Loading diff viewer...
-      </div>
-    );
-  }
-
+const DiffLoadingFallback = (props: { mode: DiffPanelMode }) => {
   return (
-    <aside className="flex h-full w-[560px] shrink-0 items-center justify-center border-l border-border bg-card px-4 text-center text-xs text-muted-foreground/70">
-      Loading diff viewer...
-    </aside>
+    <DiffPanelShell mode={props.mode} header={<DiffPanelHeaderSkeleton />}>
+      <DiffPanelLoadingState label="Loading diff viewer..." />
+    </DiffPanelShell>
+  );
+};
+
+const LazyDiffPanel = (props: { mode: DiffPanelMode }) => {
+  return (
+    <DiffWorkerPoolProvider>
+      <Suspense fallback={<DiffLoadingFallback mode={props.mode} />}>
+        <DiffPanel mode={props.mode} />
+      </Suspense>
+    </DiffWorkerPoolProvider>
   );
 };
 
@@ -88,8 +97,9 @@ const DiffPanelInlineSidebar = (props: {
   diffOpen: boolean;
   onCloseDiff: () => void;
   onOpenDiff: () => void;
+  renderDiffContent: boolean;
 }) => {
-  const { diffOpen, onCloseDiff, onOpenDiff } = props;
+  const { diffOpen, onCloseDiff, onOpenDiff, renderDiffContent } = props;
   const onOpenChange = useCallback(
     (open: boolean) => {
       if (open) {
@@ -164,9 +174,7 @@ const DiffPanelInlineSidebar = (props: {
           storageKey: DIFF_INLINE_SIDEBAR_WIDTH_STORAGE_KEY,
         }}
       >
-        <Suspense fallback={<DiffLoadingFallback inline />}>
-          <DiffPanel mode="sidebar" />
-        </Suspense>
+        {renderDiffContent ? <LazyDiffPanel mode="sidebar" /> : null}
         <SidebarRail />
       </Sidebar>
     </SidebarProvider>
@@ -245,7 +253,7 @@ function RouteTerminalDrawer({ focusedThreadId }: { focusedThreadId: ThreadId })
     [keybindings],
   );
 
-  const hasReachedTerminalLimit = terminalState.terminalIds.length >= MAX_THREAD_TERMINAL_COUNT;
+  const hasReachedTerminalLimit = terminalState.terminalIds.length >= MAX_TERMINALS_PER_GROUP;
 
   const setTerminalHeight = useCallback(
     (height: number) => {
@@ -328,6 +336,7 @@ function ChatThreadRouteView() {
   const routeThreadExists = threadExists || draftThreadExists;
   const diffOpen = search.diff === "1";
   const shouldUseDiffSheet = useMediaQuery(DIFF_INLINE_LAYOUT_MEDIA_QUERY);
+  const [hasOpenedDiff, setHasOpenedDiff] = useState(diffOpen);
   const commandPaletteOpen = useCommandPaletteStore((state) => state.open);
   const commandPaletteMode = useCommandPaletteStore((state) => state.mode);
   const commandPalettePreviewLeafId = useCommandPaletteStore((state) => state.previewLeafId);
@@ -560,6 +569,12 @@ function ChatThreadRouteView() {
   );
 
   useEffect(() => {
+    if (diffOpen) {
+      setHasOpenedDiff(true);
+    }
+  }, [diffOpen]);
+
+  useEffect(() => {
     if (!threadsHydrated) {
       return;
     }
@@ -665,11 +680,12 @@ function ChatThreadRouteView() {
               diffOpen={diffOpen}
               onCloseDiff={closeDiff}
               onOpenDiff={openDiff}
+              renderDiffContent={diffOpen || hasOpenedDiff}
             />
           )}
           {shouldUseDiffSheet && (
             <DiffPanelSheet diffOpen={diffOpen} onCloseDiff={closeDiff}>
-              <Suspense fallback={<DiffLoadingFallback inline={false} />}>
+              <Suspense fallback={<DiffLoadingFallback mode="sheet" />}>
                 <DiffPanel mode="sheet" />
               </Suspense>
             </DiffPanelSheet>
@@ -728,6 +744,7 @@ function ChatThreadRouteView() {
             diffOpen={diffOpen}
             onCloseDiff={closeDiff}
             onOpenDiff={openDiff}
+            renderDiffContent={diffOpen || hasOpenedDiff}
           />
         </div>
         <RouteTerminalDrawer focusedThreadId={focusedThreadId} />
@@ -740,7 +757,7 @@ function ChatThreadRouteView() {
       <div className="flex min-h-0 flex-1 overflow-hidden">
         {singleThreadPane}
         <DiffPanelSheet diffOpen={diffOpen} onCloseDiff={closeDiff}>
-          <Suspense fallback={<DiffLoadingFallback inline={false} />}>
+          <Suspense fallback={<DiffLoadingFallback mode="sheet" />}>
             <DiffPanel mode="sheet" />
           </Suspense>
         </DiffPanelSheet>
