@@ -38,7 +38,7 @@ import { isMacPlatform, newThreadId } from "../lib/utils";
 import { readNativeApi } from "../nativeApi";
 import { findLeafByThreadId, type SplitDirection, useSplitViewStore } from "../splitViewStore";
 import { useStore } from "../store";
-import { preferredTerminalEditor } from "../terminal-links";
+import { openInPreferredEditor } from "../editorPreferences";
 import { renameThreadTitle } from "../threadMeta";
 import { DEFAULT_RUNTIME_MODE } from "../types";
 import type { Thread } from "../types";
@@ -606,10 +606,11 @@ export function CommandPalette() {
         return;
       }
       try {
-        await api.shell.openInEditor(
-          cwd,
-          editor === "file-manager" ? "file-manager" : preferredTerminalEditor(),
-        );
+        if (editor === "file-manager") {
+          await api.shell.openInEditor(cwd, "file-manager");
+        } else {
+          await openInPreferredEditor(api, cwd);
+        }
         resetPalette();
       } catch (error) {
         toastManager.add({
