@@ -95,6 +95,7 @@ export function CommandPalette() {
   const workspaces = useSplitViewStore((state) => state.workspaces);
   const activateWorkspace = useSplitViewStore((state) => state.activateWorkspace);
   const closePane = useSplitViewStore((state) => state.closePane);
+  const createWorkspace = useSplitViewStore((state) => state.createWorkspace);
   const deactivateWorkspace = useSplitViewStore((state) => state.deactivateWorkspace);
   const splitThread = useSplitViewStore((state) => state.splitThread);
   const splitLeaf = useSplitViewStore((state) => state.splitLeaf);
@@ -144,7 +145,7 @@ export function CommandPalette() {
       }));
 
     const workspaceItems: PaletteItem[] =
-      paletteMode === "split-right" || paletteMode === "split-down"
+      paletteMode === "split-right" || paletteMode === "split-down" || paletteMode === "new-workspace"
         ? []
         : workspaces.map((workspace) => ({
             kind: "workspace",
@@ -334,6 +335,15 @@ export function CommandPalette() {
         return;
       }
 
+      if (paletteMode === "new-workspace") {
+        createWorkspace(threadId);
+        void navigate({
+          to: "/$threadId",
+          params: { threadId },
+        });
+        return;
+      }
+
       deactivateWorkspace();
       void navigate({
         to: "/$threadId",
@@ -343,6 +353,7 @@ export function CommandPalette() {
     [
       clearDraftThread,
       closePane,
+      createWorkspace,
       deactivateWorkspace,
       navigate,
       paletteMode,
@@ -492,7 +503,9 @@ export function CommandPalette() {
                   ? "Split down with a thread or project…"
                   : paletteMode === "replace-focused"
                     ? "Replace the focused pane with a thread or project…"
-                    : "Search threads and projects…"
+                    : paletteMode === "new-workspace"
+                      ? "Add a thread to a new workspace…"
+                      : "Search threads and projects…"
             }
           />
           <CommandPanel
@@ -516,7 +529,7 @@ export function CommandPalette() {
             </span>
             <span>
               <kbd className="rounded border bg-muted px-1.5 py-0.5 text-[10px] font-medium">↵</kbd>{" "}
-              {splitDirection ? "split" : paletteMode === "replace-focused" ? "replace" : "select"}
+              {splitDirection ? "split" : paletteMode === "replace-focused" ? "replace" : paletteMode === "new-workspace" ? "create workspace" : "select"}
             </span>
             <span>
               <kbd className="rounded border bg-muted px-1.5 py-0.5 text-[10px] font-medium">

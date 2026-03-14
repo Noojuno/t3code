@@ -2635,7 +2635,7 @@ export default function ChatView({ threadId, onCloseSplitPane }: ChatViewProps) 
       if (!script) return;
       event.preventDefault();
       event.stopPropagation();
-      void runProjectScript(script);
+      void runProjectScript(script, { allowLocalDraftThread: true });
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
@@ -3868,7 +3868,7 @@ export default function ChatView({ threadId, onCloseSplitPane }: ChatViewProps) 
           gitCwd={gitCwd}
           diffOpen={diffOpen}
           onRunProjectScript={(script) => {
-            void runProjectScript(script);
+            void runProjectScript(script, { allowLocalDraftThread: true });
           }}
           onAddProjectScript={saveProjectScript}
           onUpdateProjectScript={updateProjectScript}

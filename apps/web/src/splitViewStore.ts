@@ -326,7 +326,7 @@ function isValidWorkspace(workspace: unknown): workspace is Workspace {
   if (!candidate.root || typeof candidate.root !== "object") return false;
   try {
     const root = candidate.root as SplitNode;
-    if (countLeaves(root) < 2) return false;
+    if (countLeaves(root) < 1) return false;
     if (!findLeaf(root, candidate.focusedLeafId)) return false;
   } catch {
     return false;
@@ -484,6 +484,7 @@ export interface SplitViewActions {
   closePane: (leafId: string) => ThreadId | null;
   closeWorkspace: (workspaceId: string) => ThreadId | null;
   renameWorkspace: (workspaceId: string, name: string) => void;
+  createWorkspace: (threadId: ThreadId) => void;
   activateWorkspace: (workspaceId: string) => ThreadId | null;
   deactivateWorkspace: () => void;
   setFocusedLeaf: (leafId: string) => void;
@@ -574,8 +575,7 @@ export const useSplitViewStore = create<SplitViewStore>((set, get) => ({
     if (!state.group) return null;
 
     const remaining = removeLeaf(state.group.root, leafId);
-    if (!remaining || remaining.type === "leaf") {
-      const fallbackThreadId = remaining?.threadId ?? null;
+    if (!remaining) {
       const nextWorkspaces = state.workspaces.filter(
         (workspace) => workspace.id !== state.group?.id,
       );
@@ -584,7 +584,7 @@ export const useSplitViewStore = create<SplitViewStore>((set, get) => ({
         zoomed: false,
         dragOver: null,
       });
-      return fallbackThreadId;
+      return null;
     }
 
     const needNewFocus = state.group.focusedLeafId === leafId;
@@ -601,7 +601,7 @@ export const useSplitViewStore = create<SplitViewStore>((set, get) => ({
       ),
       zoomed: false,
     });
-    return null;
+    return remaining.type === "leaf" ? remaining.threadId : null;
   },
 
   closeWorkspace: (workspaceId) => {
@@ -632,6 +632,26 @@ export const useSplitViewStore = create<SplitViewStore>((set, get) => ({
       if (nextWorkspaces === state.workspaces) return state;
       return {
         ...withWorkspaceCollection(nextWorkspaces, state.activeWorkspaceId),
+      };
+    });
+  },
+
+  createWorkspace: (threadId) => {
+    set((state) => {
+      const leaf: SplitLeaf = {
+        type: "leaf",
+        id: splitNodeId(),
+        threadId,
+      };
+      const workspace: Workspace = {
+        id: splitNodeId(),
+        name: buildNextWorkspaceName(state.workspaces),
+        root: leaf,
+        focusedLeafId: leaf.id,
+      };
+      return {
+        ...withWorkspaceCollection([...state.workspaces, workspace], workspace.id),
+        zoomed: false,
       };
     });
   },
@@ -792,12 +812,6 @@ export const useSplitViewStore = create<SplitViewStore>((set, get) => ({
     for (const workspace of state.workspaces) {
       const nextRoot = pruneInvalidLeaves(workspace.root, validThreadIds);
       if (!nextRoot) {
-        continue;
-      }
-      if (nextRoot.type === "leaf") {
-        if (workspace.id === state.activeWorkspaceId) {
-          activeFallbackThreadId = nextRoot.threadId;
-        }
         continue;
       }
       const focusedLeaf = findLeaf(nextRoot, workspace.focusedLeafId) ?? firstLeaf(nextRoot);

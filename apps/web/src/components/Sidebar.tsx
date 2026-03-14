@@ -93,6 +93,7 @@ import {
   SidebarSeparator,
   SidebarTrigger,
 } from "./ui/sidebar";
+import { useCommandPaletteStore } from "../commandPaletteStore";
 import { useThreadSelectionStore } from "../threadSelectionStore";
 import {
   useSplitViewStore,
@@ -1484,8 +1485,25 @@ export default function Sidebar() {
             <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
               Workspaces
             </span>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <button
+                    type="button"
+                    aria-label="Add thread to workspace"
+                    className="inline-flex size-5 items-center justify-center rounded-md text-muted-foreground/60 transition-colors hover:bg-accent hover:text-foreground"
+                    onClick={() => {
+                      useCommandPaletteStore.getState().openPalette({ mode: "new-workspace" });
+                    }}
+                  />
+                }
+              >
+                <PlusIcon className="size-3.5" />
+              </TooltipTrigger>
+              <TooltipPopup side="right">Add thread</TooltipPopup>
+            </Tooltip>
           </div>
-          {workspaces.length > 0 ? (
+          {workspaces.length > 0 && (
             <SidebarMenu>
               {workspaces.map((workspace) => {
                 const isExpanded = expandedWorkspaceIds.has(workspace.id);
@@ -1705,8 +1723,6 @@ export default function Sidebar() {
                 );
               })}
             </SidebarMenu>
-          ) : (
-            <div className="px-2 pb-1 text-xs text-muted-foreground/60">No workspaces yet</div>
           )}
         </SidebarGroup>
         <SidebarGroup className="px-2 py-2">

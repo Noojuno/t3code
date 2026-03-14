@@ -1,7 +1,7 @@
 import type { ThreadId } from "@t3tools/contracts";
 import { create } from "zustand";
 
-export type CommandPaletteMode = "default" | "split-right" | "split-down" | "replace-focused";
+export type CommandPaletteMode = "default" | "split-right" | "split-down" | "replace-focused" | "new-workspace";
 
 interface CommandPaletteState {
   open: boolean;
