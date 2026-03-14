@@ -5,6 +5,7 @@ import {
   ApprovalRequestId,
   EventId,
   IsoDateTime,
+  NonNegativeInt,
   ProviderItemId,
   ThreadId,
   TurnId,
@@ -19,6 +20,7 @@ import {
   ProviderKind,
   ProviderRequestKind,
   ProviderSandboxMode,
+  ProviderStartOptions,
   ProviderUserInputAnswers,
   RuntimeMode,
 } from "./orchestration";
@@ -46,16 +48,6 @@ export const ProviderSession = Schema.Struct({
   lastError: Schema.optional(TrimmedNonEmptyStringSchema),
 });
 export type ProviderSession = typeof ProviderSession.Type;
-
-const CodexProviderStartOptions = Schema.Struct({
-  binaryPath: Schema.optional(TrimmedNonEmptyStringSchema),
-  homePath: Schema.optional(TrimmedNonEmptyStringSchema),
-});
-
-export const ProviderStartOptions = Schema.Struct({
-  codex: Schema.optional(CodexProviderStartOptions),
-});
-export type ProviderStartOptions = typeof ProviderStartOptions.Type;
 
 export const ProviderSessionStartInput = Schema.Struct({
   threadId: ThreadId,

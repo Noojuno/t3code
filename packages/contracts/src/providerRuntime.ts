@@ -19,7 +19,12 @@ const RuntimeEventRawSource = Schema.Literals([
   "codex.app-server.notification",
   "codex.app-server.request",
   "codex.eventmsg",
+  "claude.sdk.message",
+  "claude.sdk.permission",
   "codex.sdk.thread-event",
+  "cursor.acp.notification",
+  "cursor.acp.request",
+  "cursor.acp.response",
 ]);
 export type RuntimeEventRawSource = typeof RuntimeEventRawSource.Type;
 
@@ -41,24 +46,10 @@ const ProviderRefs = Schema.Struct({
 });
 export type ProviderRefs = typeof ProviderRefs.Type;
 
-const RuntimeSessionState = Schema.Literals([
-  "starting",
-  "ready",
-  "running",
-  "waiting",
-  "stopped",
-  "error",
-]);
+const RuntimeSessionState = Schema.Literals(["starting", "ready", "running", "waiting", "stopped", "error"]);
 export type RuntimeSessionState = typeof RuntimeSessionState.Type;
 
-const RuntimeThreadState = Schema.Literals([
-  "active",
-  "idle",
-  "archived",
-  "closed",
-  "compacted",
-  "error",
-]);
+const RuntimeThreadState = Schema.Literals(["active", "idle", "archived", "closed", "compacted", "error"]);
 export type RuntimeThreadState = typeof RuntimeThreadState.Type;
 
 const RuntimeTurnState = Schema.Literals(["completed", "failed", "interrupted", "cancelled"]);

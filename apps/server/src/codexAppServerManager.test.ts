@@ -98,6 +98,7 @@ function createPendingUserInputHarness() {
   const manager = new CodexAppServerManager();
   const context = {
     session: {
+      sessionId: "sess_1",
       provider: "codex",
       status: "ready",
       threadId: "thread_1",
@@ -529,6 +530,36 @@ describe("sendTurn", () => {
         mode: "plan",
         settings: {
           model: "gpt-5.2-codex",
+          reasoning_effort: "medium",
+          developer_instructions: CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS,
+        },
+      },
+    });
+  });
+
+  it("passes Codex plan mode as a collaboration preset on turn/start", async () => {
+    const { manager, context, sendRequest } = createSendTurnHarness();
+
+    await manager.sendTurn({
+      threadId: asThreadId("thread_1"),
+      input: "Plan the work",
+      interactionMode: "plan",
+    });
+
+    expect(sendRequest).toHaveBeenCalledWith(context, "turn/start", {
+      threadId: "thread_1",
+      input: [
+        {
+          type: "text",
+          text: "Plan the work",
+          text_elements: [],
+        },
+      ],
+      model: "gpt-5.3-codex",
+      collaborationMode: {
+        mode: "plan",
+        settings: {
+          model: "gpt-5.3-codex",
           reasoning_effort: "medium",
           developer_instructions: CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS,
         },

@@ -534,6 +534,7 @@ const makeProviderService = (options?: ProviderServiceLiveOptions) =>
       respondToRequest,
       respondToUserInput,
       stopSession,
+      stopAll: runStopAll,
       listSessions,
       getCapabilities,
       rollbackConversation,

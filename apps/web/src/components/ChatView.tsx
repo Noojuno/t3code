@@ -1,10 +1,12 @@
 import {
   type ApprovalRequestId,
+  CURSOR_REASONING_OPTIONS,
   DEFAULT_MODEL_BY_PROVIDER,
   EDITORS,
   type EditorId,
   type KeybindingCommand,
   type CodexReasoningEffort,
+  type CursorReasoningOption,
   type MessageId,
   type ProjectId,
   type ProjectEntry,
@@ -25,8 +27,12 @@ import {
 import {
   getDefaultModel,
   getDefaultReasoningEffort,
+  getCursorModelCapabilities,
+  getCursorModelFamilyOptions,
   getReasoningEffortOptions,
   normalizeModelSlug,
+  parseCursorModelSelection,
+  resolveCursorModelFromSelection,
   resolveModelSlugForProvider,
 } from "@t3tools/shared/model";
 import {
@@ -962,7 +968,7 @@ export default function ChatView({ threadId, onCloseSplitPane }: ChatViewProps) 
     selectedProvider,
     activeThread?.model ?? activeProject?.model ?? getDefaultModel(selectedProvider),
   );
-  const customModelsForSelectedProvider = settings.customCodexModels;
+  const customModelsForSelectedProvider = getCustomModelOptionsByProvider(settings)[selectedProvider];
   const selectedModel = useMemo(() => {
     const draftModel = composerDraft.model;
     if (!draftModel) {
@@ -970,7 +976,7 @@ export default function ChatView({ threadId, onCloseSplitPane }: ChatViewProps) 
     }
     return resolveAppModelSelection(
       selectedProvider,
-      customModelsForSelectedProvider,
+      customModelsForSelectedProvider.map((m) => m.slug),
       draftModel,
     ) as ModelSlug;
   }, [baseThreadModel, composerDraft.model, customModelsForSelectedProvider, selectedProvider]);
@@ -1000,16 +1006,40 @@ export default function ChatView({ threadId, onCloseSplitPane }: ChatViewProps) 
       },
     };
   }, [settings.codexBinaryPath, settings.codexHomePath]);
-  const selectedModelForPicker = selectedModel;
+  const cursorModelSelectionLockedReason =
+    hasThreadStarted && selectedProvider === "cursor"
+      ? "Cursor currently does not support changing models after the first message in a thread."
+      : null;
+  const selectedCursorModel = useMemo(
+    () => (selectedProvider === "cursor" ? parseCursorModelSelection(selectedModel) : null),
+    [selectedModel, selectedProvider],
+  );
+  const selectedCursorModelCapabilities = useMemo(
+    () => (selectedCursorModel ? getCursorModelCapabilities(selectedCursorModel.family) : null),
+    [selectedCursorModel],
+  );
+  const hasSelectedCursorTraits = Boolean(
+    selectedCursorModelCapabilities &&
+      (selectedCursorModelCapabilities.supportsReasoning ||
+        selectedCursorModelCapabilities.supportsFast ||
+        selectedCursorModelCapabilities.supportsThinking),
+  );
+  const selectedModelForPicker =
+    selectedProvider === "cursor" && selectedCursorModel
+      ? selectedCursorModel.family
+      : selectedModel;
   const modelOptionsByProvider = useMemo(
     () => getCustomModelOptionsByProvider(settings),
     [settings],
   );
   const selectedModelForPickerWithCustomFallback = useMemo(() => {
-    const currentOptions = modelOptionsByProvider[selectedProvider];
-    return currentOptions.some((option) => option.slug === selectedModelForPicker)
-      ? selectedModelForPicker
-      : (normalizeModelSlug(selectedModelForPicker, selectedProvider) ?? selectedModelForPicker);
+    if (selectedProvider !== "cursor") {
+      const currentOptions = modelOptionsByProvider[selectedProvider];
+      return currentOptions.some((option) => option.slug === selectedModelForPicker)
+        ? selectedModelForPicker
+        : (normalizeModelSlug(selectedModelForPicker, selectedProvider) ?? selectedModelForPicker);
+    }
+    return selectedModelForPicker;
   }, [modelOptionsByProvider, selectedModelForPicker, selectedProvider]);
   const searchableModelOptions = useMemo(
     () =>
@@ -5839,9 +5869,20 @@ const COMING_SOON_PROVIDER_OPTIONS = [
 
 function getCustomModelOptionsByProvider(settings: {
   customCodexModels: readonly string[];
+  customClaudeModels: readonly string[];
+  customCursorModels: readonly string[];
 }): Record<ProviderKind, ReadonlyArray<{ slug: string; name: string }>> {
+  const cursorFamilyOptions = getCursorModelFamilyOptions();
   return {
     codex: getAppModelOptions("codex", settings.customCodexModels),
+    claudeCode: getAppModelOptions("claudeCode", settings.customClaudeModels),
+    cursor: [
+      ...cursorFamilyOptions,
+      ...getAppModelOptions("cursor", settings.customCursorModels).filter(
+        (option) =>
+          option.isCustom && !cursorFamilyOptions.some((family) => family.slug === option.slug),
+      ),
+    ],
   };
 }
 

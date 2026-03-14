@@ -194,6 +194,7 @@ describe("ProviderCommandReactor", () => {
           sessionModelSwitch: provider === "codex" ? "in-session" : "in-session",
         }),
       rollbackConversation: () => unsupported(),
+      stopAll: () => unsupported(),
       streamEvents: Stream.fromPubSub(runtimeEventPubSub),
     };
 
