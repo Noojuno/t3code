@@ -14,6 +14,7 @@ import {
   AutocompleteItem,
   AutocompleteList,
   AutocompleteSeparator,
+  useAutocompleteFilteredItems,
 } from "~/components/ui/autocomplete";
 
 const CommandDialog = CommandDialogPrimitive.Root;
@@ -204,6 +205,10 @@ function CommandFooter({ className, ...props }: React.ComponentProps<"div">) {
   );
 }
 
+function useCommandFilteredItems<T>(): T[] {
+  return useAutocompleteFilteredItems<T>();
+}
+
 export {
   CommandCreateHandle,
   Command,
@@ -221,4 +226,5 @@ export {
   CommandPanel,
   CommandSeparator,
   CommandShortcut,
+  useCommandFilteredItems,
 };

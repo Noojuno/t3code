@@ -1,6 +1,7 @@
-import { ThreadId } from "@t3tools/contracts";
+import { type ProjectId, type ResolvedKeybindingsConfig, ThreadId } from "@t3tools/contracts";
+import { useQuery } from "@tanstack/react-query";
 import { createFileRoute, retainSearchParams, useNavigate } from "@tanstack/react-router";
-import { Suspense, lazy, type ReactNode, useCallback, useEffect, useState } from "react";
+import { Suspense, lazy, useState, useMemo, type ReactNode, useCallback, useEffect } from "react";
 
 import ChatView from "../components/ChatView";
 import { DiffWorkerPoolProvider } from "../components/DiffWorkerPoolProvider";
@@ -10,14 +11,34 @@ import {
   DiffPanelShell,
   type DiffPanelMode,
 } from "../components/DiffPanelShell";
+import ThreadTerminalDrawer from "../components/ThreadTerminalDrawer";
+import { SplitPanelRoot, SplitDropPreview, SplitPlaceholder } from "../components/SplitPanel";
 import { useComposerDraftStore } from "../composerDraftStore";
 import {
+  clearDiffSearchParams,
   type DiffRouteSearch,
   parseDiffRouteSearch,
   stripDiffSearchParams,
 } from "../diffRouteSearch";
+import { shortcutLabelForCommand } from "../keybindings";
 import { useMediaQuery } from "../hooks/useMediaQuery";
+import { projectScriptRuntimeEnv } from "../projectScripts";
+import { serverConfigQueryOptions } from "~/lib/serverReactQuery";
 import { useStore } from "../store";
+import { useCommandPaletteStore } from "../commandPaletteStore";
+import {
+  useSplitViewStore,
+  computeClosestDropZone,
+  dropZoneToSplit,
+  type DropZone,
+  findPane,
+  findPaneByThreadId,
+  firstThreadPane,
+} from "../splitViewStore";
+import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
+import { MAX_TERMINALS_PER_GROUP } from "../types";
+import { newThreadId, randomUUID } from "../lib/utils";
+import { closeTerminalSession } from "../lib/closeTerminalSession";
 import { Sheet, SheetPopup } from "../components/ui/sheet";
 import { Sidebar, SidebarInset, SidebarProvider, SidebarRail } from "~/components/ui/sidebar";
 
@@ -160,40 +181,315 @@ const DiffPanelInlineSidebar = (props: {
   );
 };
 
+/** Renders a single thread pane inside a split pane. */
+function SplitThreadPane({
+  threadId,
+  onCloseSplitPane,
+}: {
+  threadId: ThreadId;
+  onCloseSplitPane: () => void;
+}) {
+  return (
+    <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden bg-background text-foreground">
+      <ChatView key={threadId} threadId={threadId} onCloseSplitPane={onCloseSplitPane} />
+    </div>
+  );
+}
+
+const EMPTY_KEYBINDINGS: ResolvedKeybindingsConfig = [];
+
+/**
+ * Route-level terminal drawer that renders BELOW the SidebarInset.
+ * It auto-switches to show the focused thread's terminal when the split
+ * pane focus changes.
+ */
+function RouteTerminalDrawer({ focusedThreadId }: { focusedThreadId: ThreadId }) {
+  const threads = useStore((store) => store.threads);
+  const projects = useStore((store) => store.projects);
+  const draftThreadsByThreadId = useComposerDraftStore((s) => s.draftThreadsByThreadId);
+
+  const serverConfigQuery = useQuery(serverConfigQueryOptions());
+  const keybindings = serverConfigQuery.data?.keybindings ?? EMPTY_KEYBINDINGS;
+
+  const terminalState = useTerminalStateStore((state) =>
+    selectThreadTerminalState(state.terminalStateByThreadId, focusedThreadId),
+  );
+  const terminalFocusRequestId = useTerminalStateStore((s) => s.terminalFocusRequestId);
+  const requestTerminalFocus = useTerminalStateStore((s) => s.requestTerminalFocus);
+  const storeSetTerminalHeight = useTerminalStateStore((s) => s.setTerminalHeight);
+  const storeSplitTerminal = useTerminalStateStore((s) => s.splitTerminal);
+  const storeNewTerminal = useTerminalStateStore((s) => s.newTerminal);
+  const storeSetActiveTerminal = useTerminalStateStore((s) => s.setActiveTerminal);
+  const storeCloseTerminal = useTerminalStateStore((s) => s.closeTerminal);
+
+  // Resolve the thread and project for the focused thread
+  const serverThread = threads.find((t) => t.id === focusedThreadId);
+  const draftThread = draftThreadsByThreadId[focusedThreadId] ?? null;
+  const projectId = serverThread?.projectId ?? draftThread?.projectId ?? null;
+  const activeProject = projectId ? projects.find((p) => p.id === projectId) : undefined;
+  const worktreePath = serverThread?.worktreePath ?? null;
+  const cwd = worktreePath ?? activeProject?.cwd ?? null;
+
+  const threadTerminalRuntimeEnv = useMemo(() => {
+    if (!activeProject?.cwd) return {};
+    return projectScriptRuntimeEnv({
+      project: {
+        cwd: activeProject.cwd,
+      },
+      worktreePath,
+    });
+  }, [activeProject?.cwd, worktreePath]);
+
+  const splitTerminalShortcutLabel = useMemo(
+    () => shortcutLabelForCommand(keybindings, "terminal.split"),
+    [keybindings],
+  );
+  const newTerminalShortcutLabel = useMemo(
+    () => shortcutLabelForCommand(keybindings, "terminal.new"),
+    [keybindings],
+  );
+  const closeTerminalShortcutLabel = useMemo(
+    () => shortcutLabelForCommand(keybindings, "terminal.close"),
+    [keybindings],
+  );
+
+  const hasReachedTerminalLimit = terminalState.terminalIds.length >= MAX_TERMINALS_PER_GROUP;
+
+  const setTerminalHeight = useCallback(
+    (height: number) => {
+      storeSetTerminalHeight(focusedThreadId, height);
+    },
+    [focusedThreadId, storeSetTerminalHeight],
+  );
+  const splitTerminal = useCallback(() => {
+    if (hasReachedTerminalLimit) return;
+    const terminalId = `terminal-${randomUUID()}`;
+    storeSplitTerminal(focusedThreadId, terminalId);
+    requestTerminalFocus();
+  }, [focusedThreadId, storeSplitTerminal, hasReachedTerminalLimit, requestTerminalFocus]);
+  const createNewTerminal = useCallback(() => {
+    if (hasReachedTerminalLimit) return;
+    const terminalId = `terminal-${randomUUID()}`;
+    storeNewTerminal(focusedThreadId, terminalId);
+    requestTerminalFocus();
+  }, [focusedThreadId, storeNewTerminal, hasReachedTerminalLimit, requestTerminalFocus]);
+  const activateTerminal = useCallback(
+    (terminalId: string) => {
+      storeSetActiveTerminal(focusedThreadId, terminalId);
+      requestTerminalFocus();
+    },
+    [focusedThreadId, storeSetActiveTerminal, requestTerminalFocus],
+  );
+  const closeTerminal = useCallback(
+    (terminalId: string) => {
+      const isFinalTerminal = terminalState.terminalIds.length <= 1;
+      void closeTerminalSession({ threadId: focusedThreadId, terminalId, isFinalTerminal }).catch(
+        () => undefined,
+      );
+      storeCloseTerminal(focusedThreadId, terminalId);
+      requestTerminalFocus();
+    },
+    [focusedThreadId, storeCloseTerminal, terminalState.terminalIds.length, requestTerminalFocus],
+  );
+
+  const drawerOpen = terminalState.terminalOpen;
+
+  if (!drawerOpen || !cwd || !activeProject) {
+    return null;
+  }
+
+  return (
+    <ThreadTerminalDrawer
+      key={focusedThreadId}
+      threadId={focusedThreadId}
+      cwd={cwd}
+      runtimeEnv={threadTerminalRuntimeEnv}
+      height={terminalState.terminalHeight}
+      terminalIds={terminalState.terminalIds}
+      activeTerminalId={terminalState.activeTerminalId}
+      terminalGroups={terminalState.terminalGroups}
+      activeTerminalGroupId={terminalState.activeTerminalGroupId}
+      focusRequestId={terminalFocusRequestId}
+      onSplitTerminal={splitTerminal}
+      onNewTerminal={createNewTerminal}
+      {...(splitTerminalShortcutLabel ? { splitShortcutLabel: splitTerminalShortcutLabel } : {})}
+      {...(newTerminalShortcutLabel ? { newShortcutLabel: newTerminalShortcutLabel } : {})}
+      {...(closeTerminalShortcutLabel ? { closeShortcutLabel: closeTerminalShortcutLabel } : {})}
+      onActiveTerminalChange={activateTerminal}
+      onCloseTerminal={closeTerminal}
+      onHeightChange={setTerminalHeight}
+    />
+  );
+}
+
 function ChatThreadRouteView() {
   const threadsHydrated = useStore((store) => store.threadsHydrated);
+  const threads = useStore((store) => store.threads);
   const navigate = useNavigate();
   const threadId = Route.useParams({
     select: (params) => ThreadId.makeUnsafe(params.threadId),
   });
   const search = Route.useSearch();
-  const threadExists = useStore((store) => store.threads.some((thread) => thread.id === threadId));
-  const draftThreadExists = useComposerDraftStore((store) =>
-    Object.hasOwn(store.draftThreadsByThreadId, threadId),
-  );
+  const draftThreadsByThreadId = useComposerDraftStore((store) => store.draftThreadsByThreadId);
+  const threadExists = threads.some((thread) => thread.id === threadId);
+  const draftThreadExists = Object.hasOwn(draftThreadsByThreadId, threadId);
   const routeThreadExists = threadExists || draftThreadExists;
   const diffOpen = search.diff === "1";
   const shouldUseDiffSheet = useMediaQuery(DIFF_INLINE_LAYOUT_MEDIA_QUERY);
+  const commandPaletteOpen = useCommandPaletteStore((state) => state.open);
+  const commandPaletteMode = useCommandPaletteStore((state) => state.mode);
+  const commandPalettePreviewPaneId = useCommandPaletteStore((state) => state.previewPaneId);
+  const commandPalettePreviewThreadId = useCommandPaletteStore((state) => state.previewThreadId);
+
+  // Split view state
+  const splitGroup = useSplitViewStore((s) => s.group);
+  const setFocusedPane = useSplitViewStore((s) => s.setFocusedPane);
+  const splitThread = useSplitViewStore((s) => s.splitThread);
+  const splitPane = useSplitViewStore((s) => s.splitPane);
+  const replaceThreadInPane = useSplitViewStore((s) => s.replaceThreadInPane);
+  const reconcileThreads = useSplitViewStore((s) => s.reconcileThreads);
+  const draggingThreadId = useSplitViewStore((s) => s.draggingThreadId);
+  const setProjectDraftThreadId = useComposerDraftStore((s) => s.setProjectDraftThreadId);
+  const isSplitView = splitGroup !== null;
+
+  // Drop zone visual state for single-thread mode
+  const [initialDropZone, setInitialDropZone] = useState<DropZone | null>(null);
+
   // TanStack Router keeps active route components mounted across param-only navigations
   // unless remountDeps are configured, so this stays warm across thread switches.
   const [hasOpenedDiff, setHasOpenedDiff] = useState(diffOpen);
+
+  const createProjectDraftThread = useCallback(
+    (projectId: ProjectId): ThreadId => {
+      const tid = newThreadId();
+      setProjectDraftThreadId(projectId, tid, {
+        createdAt: new Date().toISOString(),
+        branch: null,
+        worktreePath: null,
+        envMode: "local",
+        runtimeMode: "full-access",
+      });
+      return tid;
+    },
+    [setProjectDraftThreadId],
+  );
+
+  /** Core drop logic for both split-mode and single-thread-mode drops. */
+  const executeDrop = useCallback(
+    (
+      droppedThreadId: ThreadId | null,
+      projectId: string | null,
+      zone: DropZone,
+      paneId: string | null,
+    ) => {
+      const resolvedThreadId = droppedThreadId ?? (projectId ? createProjectDraftThread(projectId as ProjectId) : null);
+      if (!resolvedThreadId) return;
+
+      if (zone === "center") {
+        if (isSplitView && paneId) {
+          const existingPane = splitGroup
+            ? findPaneByThreadId(splitGroup.root, resolvedThreadId)
+            : null;
+          if (existingPane) {
+            setFocusedPane(existingPane.id);
+          } else {
+            replaceThreadInPane(paneId, resolvedThreadId);
+          }
+        } else {
+          void navigate({
+            to: "/$threadId",
+            params: { threadId: resolvedThreadId },
+          });
+        }
+        return;
+      }
+
+      const { direction, insertBefore } = dropZoneToSplit(zone);
+      if (isSplitView && paneId) {
+        splitPane(paneId, resolvedThreadId, direction, insertBefore);
+      } else {
+        splitThread(threadId, resolvedThreadId, direction, insertBefore);
+      }
+    },
+    [
+      createProjectDraftThread,
+      isSplitView,
+      navigate,
+      replaceThreadInPane,
+      setFocusedPane,
+      splitGroup,
+      splitPane,
+      splitThread,
+      threadId,
+    ],
+  );
+
+  /** Handle a thread/project dropped onto a split pane's drop zone. */
+  const handleSplitDrop = useCallback(
+    (paneId: string, droppedThreadId: ThreadId | null, projectId: string | null, zone: DropZone) => {
+      executeDrop(droppedThreadId, projectId, zone, paneId);
+    },
+    [executeDrop],
+  );
+
+  /** Handle initial drop onto the single-thread view (not yet split). */
+  const handleInitialDrop = useCallback(
+    (e: React.DragEvent) => {
+      e.preventDefault();
+      const droppedThreadId = e.dataTransfer.getData("application/t3-thread-id") || null;
+      const droppedProjectId = e.dataTransfer.getData("application/t3-project-id") || null;
+      const dragType = e.dataTransfer.getData("application/t3-drag-type");
+      const rect = e.currentTarget.getBoundingClientRect();
+      const zone = computeClosestDropZone(e.clientX, e.clientY, rect);
+      if (dragType === "project" && droppedProjectId) {
+        executeDrop(null, droppedProjectId, zone, null);
+      } else if (droppedThreadId && droppedThreadId !== threadId) {
+        executeDrop(droppedThreadId as ThreadId, null, zone, null);
+      }
+    },
+    [executeDrop, threadId],
+  );
+
+  const serverThreadIds = useMemo(() => threads.map((t) => t.id), [threads]);
+  const draftThreadIds = useMemo(
+    () => Object.keys(draftThreadsByThreadId) as ThreadId[],
+    [draftThreadsByThreadId],
+  );
+  const availableThreadIds = useMemo(() => {
+    const next = new Set<ThreadId>(serverThreadIds);
+    for (const id of draftThreadIds) {
+      next.add(id);
+    }
+    return next;
+  }, [serverThreadIds, draftThreadIds]);
+
+  const routeFallbackThreadId = useMemo(() => {
+    if (!splitGroup) return null;
+    const focusedPane = findPane(splitGroup.root, splitGroup.focusedPaneId);
+    if (focusedPane && "threadId" in focusedPane) return focusedPane.threadId;
+    return firstThreadPane(splitGroup.root)?.threadId ?? null;
+  }, [splitGroup]);
+  const focusedThreadId = routeFallbackThreadId ?? threadId;
+
   const closeDiff = useCallback(() => {
     void navigate({
       to: "/$threadId",
-      params: { threadId },
-      search: { diff: undefined },
+      params: { threadId: focusedThreadId },
+      search: (previous) => {
+        return clearDiffSearchParams(previous) as unknown as DiffRouteSearch;
+      },
     });
-  }, [navigate, threadId]);
+  }, [focusedThreadId, navigate]);
   const openDiff = useCallback(() => {
     void navigate({
       to: "/$threadId",
-      params: { threadId },
+      params: { threadId: focusedThreadId },
       search: (previous) => {
         const rest = stripDiffSearchParams(previous);
         return { ...rest, diff: "1" };
       },
     });
-  }, [navigate, threadId]);
+  }, [focusedThreadId, navigate]);
 
   useEffect(() => {
     if (diffOpen) {
@@ -206,43 +502,191 @@ function ChatThreadRouteView() {
       return;
     }
 
-    if (!routeThreadExists) {
-      void navigate({ to: "/", replace: true });
+    const remainingThreadId = reconcileThreads(availableThreadIds);
+    if (!routeThreadExists && remainingThreadId && remainingThreadId !== threadId) {
+      void navigate({
+        to: "/$threadId",
+        params: { threadId: remainingThreadId },
+        replace: true,
+      });
+    }
+  }, [
+    availableThreadIds,
+    navigate,
+    reconcileThreads,
+    routeThreadExists,
+    threadId,
+    threadsHydrated,
+  ]);
+
+  useEffect(() => {
+    if (!threadsHydrated || routeThreadExists || isSplitView) {
       return;
     }
-  }, [navigate, routeThreadExists, threadsHydrated, threadId]);
 
-  if (!threadsHydrated || !routeThreadExists) {
+    if (routeFallbackThreadId && routeFallbackThreadId !== threadId) {
+      void navigate({
+        to: "/$threadId",
+        params: { threadId: routeFallbackThreadId },
+        replace: true,
+      });
+      return;
+    }
+    void navigate({ to: "/", replace: true });
+  }, [isSplitView, navigate, routeFallbackThreadId, routeThreadExists, threadsHydrated, threadId]);
+
+  useEffect(() => {
+    if (
+      !threadsHydrated ||
+      !isSplitView ||
+      !routeFallbackThreadId ||
+      routeFallbackThreadId === threadId
+    ) {
+      return;
+    }
+    if (!availableThreadIds.has(routeFallbackThreadId)) {
+      return;
+    }
+    void navigate({
+      to: "/$threadId",
+      params: { threadId: routeFallbackThreadId },
+      replace: true,
+      search: (previous) => previous,
+    });
+  }, [availableThreadIds, isSplitView, navigate, routeFallbackThreadId, threadId, threadsHydrated]);
+
+  if (!threadsHydrated || (!routeThreadExists && !isSplitView)) {
     return null;
   }
 
   const shouldRenderDiffContent = diffOpen || hasOpenedDiff;
 
+  // ── Split view mode ──────────────────────────────────────────────
+  if (isSplitView) {
+    const renderThread = (tid: ThreadId, paneId: string) => {
+      const isPaletteSplitPreview =
+        commandPaletteOpen &&
+        commandPaletteMode !== "default" &&
+        commandPalettePreviewPaneId === paneId &&
+        commandPalettePreviewThreadId === tid;
+
+      if (isPaletteSplitPreview) {
+        return (
+          <div className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden bg-background p-2 text-foreground">
+            <SplitPlaceholder />
+          </div>
+        );
+      }
+
+      const onClose = () => {
+        const remaining = useSplitViewStore.getState().closePane(paneId);
+        if (remaining) {
+          void navigate({
+            to: "/$threadId",
+            params: { threadId: remaining },
+          });
+        }
+      };
+      return <SplitThreadPane threadId={tid} onCloseSplitPane={onClose} />;
+    };
+
+    return (
+      <div className="flex h-dvh w-full min-h-0 min-w-0 flex-col overflow-hidden">
+        <div className="flex min-h-0 flex-1 overflow-hidden">
+          <SidebarInset className="min-h-0 flex-1 overflow-hidden overscroll-y-none bg-muted py-3 pl-2 pr-3 text-foreground dark:bg-card">
+            <SplitPanelRoot renderThread={renderThread} onSplitDrop={handleSplitDrop} />
+          </SidebarInset>
+          {!shouldUseDiffSheet && (
+            <DiffPanelInlineSidebar
+              diffOpen={diffOpen}
+              onCloseDiff={closeDiff}
+              onOpenDiff={openDiff}
+              renderDiffContent={shouldRenderDiffContent}
+            />
+          )}
+          {shouldUseDiffSheet && (
+            <DiffPanelSheet diffOpen={diffOpen} onCloseDiff={closeDiff}>
+              {shouldRenderDiffContent ? <LazyDiffPanel mode="sheet" /> : null}
+            </DiffPanelSheet>
+          )}
+        </div>
+        <RouteTerminalDrawer focusedThreadId={focusedThreadId} />
+      </div>
+    );
+  }
+
+  // ── Single thread mode (original behaviour) ─────────────────────
+  // Wrap in a drop target so threads can be dragged here to create an initial split
+  const singleThreadPane = (
+    <SidebarInset
+      className="relative min-h-0 flex-1 overflow-hidden overscroll-y-none bg-muted py-3 pl-2 pr-3 text-foreground dark:bg-card"
+      onDragOver={(e) => {
+        if (
+          e.dataTransfer.types.includes("application/t3-thread-id") ||
+          e.dataTransfer.types.includes("application/t3-project-id")
+        ) {
+          // Don't show split preview when dragging the thread that's already displayed
+          if (draggingThreadId && draggingThreadId === threadId) return;
+          e.preventDefault();
+          const rect = e.currentTarget.getBoundingClientRect();
+          setInitialDropZone(computeClosestDropZone(e.clientX, e.clientY, rect));
+        }
+      }}
+      onDragLeave={(e) => {
+        const rect = e.currentTarget.getBoundingClientRect();
+        if (
+          e.clientX <= rect.left ||
+          e.clientX >= rect.right ||
+          e.clientY <= rect.top ||
+          e.clientY >= rect.bottom
+        ) {
+          setInitialDropZone(null);
+        }
+      }}
+      onDrop={(e) => {
+        setInitialDropZone(null);
+        handleInitialDrop(e);
+      }}
+    >
+      <div className={`flex min-h-0 min-w-0 overflow-hidden bg-background ${
+        initialDropZone
+          ? "h-full w-full rounded-lg"
+          : "absolute inset-0"
+      }`}>
+        <SplitDropPreview zone={initialDropZone}>
+          <ChatView key={threadId} threadId={threadId} onCloseSplitPane={undefined} />
+        </SplitDropPreview>
+      </div>
+    </SidebarInset>
+  );
+
   if (!shouldUseDiffSheet) {
     return (
-      <>
-        <SidebarInset className="h-dvh  min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
-          <ChatView key={threadId} threadId={threadId} />
-        </SidebarInset>
-        <DiffPanelInlineSidebar
-          diffOpen={diffOpen}
-          onCloseDiff={closeDiff}
-          onOpenDiff={openDiff}
-          renderDiffContent={shouldRenderDiffContent}
-        />
-      </>
+      <div className="flex h-dvh w-full min-h-0 min-w-0 flex-col overflow-hidden">
+        <div className="flex min-h-0 flex-1 overflow-hidden">
+          {singleThreadPane}
+          <DiffPanelInlineSidebar
+            diffOpen={diffOpen}
+            onCloseDiff={closeDiff}
+            onOpenDiff={openDiff}
+            renderDiffContent={shouldRenderDiffContent}
+          />
+        </div>
+        <RouteTerminalDrawer focusedThreadId={focusedThreadId} />
+      </div>
     );
   }
 
   return (
-    <>
-      <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
-        <ChatView key={threadId} threadId={threadId} />
-      </SidebarInset>
-      <DiffPanelSheet diffOpen={diffOpen} onCloseDiff={closeDiff}>
-        {shouldRenderDiffContent ? <LazyDiffPanel mode="sheet" /> : null}
-      </DiffPanelSheet>
-    </>
+    <div className="flex h-dvh w-full min-h-0 min-w-0 flex-col overflow-hidden">
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        {singleThreadPane}
+        <DiffPanelSheet diffOpen={diffOpen} onCloseDiff={closeDiff}>
+          {shouldRenderDiffContent ? <LazyDiffPanel mode="sheet" /> : null}
+        </DiffPanelSheet>
+      </div>
+      <RouteTerminalDrawer focusedThreadId={focusedThreadId} />
+    </div>
   );
 }
 

@@ -107,7 +107,7 @@ function terminalThemeFromApp(): ITheme {
   };
 }
 
-interface TerminalViewportProps {
+export interface TerminalViewportProps {
   threadId: ThreadId;
   terminalId: string;
   cwd: string;
@@ -119,7 +119,7 @@ interface TerminalViewportProps {
   drawerHeight: number;
 }
 
-function TerminalViewport({
+export function TerminalViewport({
   threadId,
   terminalId,
   cwd,

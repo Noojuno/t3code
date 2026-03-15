@@ -468,6 +468,13 @@ function updateTerminalStateByThreadId(
 
 interface TerminalStateStoreState {
   terminalStateByThreadId: Record<ThreadId, ThreadTerminalState>;
+  /**
+   * Monotonically increasing counter bumped every time a terminal should
+   * be re-focused (e.g. after split, new, or close). Components observe
+   * this value to trigger focus without needing to thread callbacks.
+   */
+  terminalFocusRequestId: number;
+  requestTerminalFocus: () => void;
   setTerminalOpen: (threadId: ThreadId, open: boolean) => void;
   setTerminalHeight: (threadId: ThreadId, height: number) => void;
   splitTerminal: (threadId: ThreadId, terminalId: string) => void;
@@ -507,6 +514,9 @@ export const useTerminalStateStore = create<TerminalStateStoreState>()(
 
       return {
         terminalStateByThreadId: {},
+        terminalFocusRequestId: 0,
+        requestTerminalFocus: () =>
+          set((state) => ({ terminalFocusRequestId: state.terminalFocusRequestId + 1 })),
         setTerminalOpen: (threadId, open) =>
           updateTerminal(threadId, (state) => setThreadTerminalOpen(state, open)),
         setTerminalHeight: (threadId, height) =>

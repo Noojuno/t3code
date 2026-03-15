@@ -86,10 +86,9 @@ import { basenameOfPath } from "../vscode-icons";
 import { useTheme } from "../hooks/useTheme";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
 import BranchToolbar from "./BranchToolbar";
-import { useCommandPalette } from "./CommandPalette";
+import { useCommandPaletteStore } from "../commandPaletteStore";
 import { resolveShortcutCommand, shortcutLabelForCommand } from "../keybindings";
 import PlanSidebar from "./PlanSidebar";
-import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
 import {
   BotIcon,
   ChevronDownIcon,
@@ -188,9 +187,10 @@ const extendReplacementRangeForTrailingSpace = (
 
 interface ChatViewProps {
   threadId: ThreadId;
+  onCloseSplitPane?: (() => void) | undefined;
 }
 
-export default function ChatView({ threadId }: ChatViewProps) {
+export default function ChatView({ threadId, onCloseSplitPane }: ChatViewProps) {
   const threads = useStore((store) => store.threads);
   const projects = useStore((store) => store.projects);
   const markThreadVisited = useStore((store) => store.markThreadVisited);
@@ -198,7 +198,7 @@ export default function ChatView({ threadId }: ChatViewProps) {
   const setStoreThreadError = useStore((store) => store.setError);
   const setStoreThreadBranch = useStore((store) => store.setThreadBranch);
   const { settings } = useAppSettings();
-  const { open: commandPaletteOpen } = useCommandPalette();
+  const commandPaletteOpen = useCommandPaletteStore((s) => s.open);
   const timestampFormat = settings.timestampFormat;
   const navigate = useNavigate();
   const rawSearch = useSearch({
@@ -2018,6 +2018,36 @@ export default function ChatView({ threadId }: ChatViewProps) {
         event.preventDefault();
         event.stopPropagation();
         onToggleDiff();
+        return;
+      }
+
+      if (command === "chat.splitRight") {
+        event.preventDefault();
+        event.stopPropagation();
+        useCommandPaletteStore.getState().openPalette({
+          mode: "split-right",
+          sourceThreadId: activeThreadId,
+        });
+        return;
+      }
+
+      if (command === "chat.splitDown") {
+        event.preventDefault();
+        event.stopPropagation();
+        useCommandPaletteStore.getState().openPalette({
+          mode: "split-down",
+          sourceThreadId: activeThreadId,
+        });
+        return;
+      }
+
+      if (command === "chat.replaceFocusedPane") {
+        event.preventDefault();
+        event.stopPropagation();
+        useCommandPaletteStore.getState().openPalette({
+          mode: "replace-focused",
+          sourceThreadId: activeThreadId,
+        });
         return;
       }
 
@@ -3851,34 +3881,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
         ) : null}
       </div>
       {/* end horizontal flex container */}
-
-      {(() => {
-        if (!terminalState.terminalOpen || !activeProject) {
-          return null;
-        }
-        return (
-          <ThreadTerminalDrawer
-            key={activeThread.id}
-            threadId={activeThread.id}
-            cwd={gitCwd ?? activeProject.cwd}
-            runtimeEnv={threadTerminalRuntimeEnv}
-            height={terminalState.terminalHeight}
-            terminalIds={terminalState.terminalIds}
-            activeTerminalId={terminalState.activeTerminalId}
-            terminalGroups={terminalState.terminalGroups}
-            activeTerminalGroupId={terminalState.activeTerminalGroupId}
-            focusRequestId={terminalFocusRequestId}
-            onSplitTerminal={splitTerminal}
-            onNewTerminal={createNewTerminal}
-            splitShortcutLabel={splitTerminalShortcutLabel ?? undefined}
-            newShortcutLabel={newTerminalShortcutLabel ?? undefined}
-            closeShortcutLabel={closeTerminalShortcutLabel ?? undefined}
-            onActiveTerminalChange={activateTerminal}
-            onCloseTerminal={closeTerminal}
-            onHeightChange={setTerminalHeight}
-          />
-        );
-      })()}
 
       {expandedImage && expandedImageItem && (
         <div
