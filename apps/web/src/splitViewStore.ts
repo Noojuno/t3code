@@ -4,13 +4,39 @@ import { Debouncer } from "@tanstack/react-pacer";
 
 export type SplitDirection = "horizontal" | "vertical";
 
-/** A leaf node displays a single thread. */
-export interface SplitLeaf {
-  readonly type: "leaf";
-  /** Stable identifier for this leaf (used for focus tracking & keying). */
+/** A pane node that displays a single thread. */
+export interface SplitThreadPane {
+  readonly type: "pane";
+  /** Discriminator — absent or `"thread"` means a thread pane (backward compat). */
+  readonly kind?: "thread";
+  /** Stable identifier for this pane (used for focus tracking & keying). */
   readonly id: string;
   /** The thread displayed in this pane. */
   readonly threadId: ThreadId;
+}
+
+/** A pane node displaying a full-size terminal. */
+export interface SplitTerminalPane {
+  readonly type: "pane";
+  readonly kind: "terminal";
+  /** Stable identifier for this pane. */
+  readonly id: string;
+  /** Terminal session identifier. */
+  readonly terminalId: string;
+  /** Working directory for the terminal. */
+  readonly cwd: string;
+}
+
+export type SplitPane = SplitThreadPane | SplitTerminalPane;
+
+/** Type guard: is this pane a thread pane? */
+export function isThreadPane(pane: SplitPane): pane is SplitThreadPane {
+  return pane.kind !== "terminal";
+}
+
+/** Type guard: is this pane a terminal pane? */
+export function isTerminalPane(pane: SplitPane): pane is SplitTerminalPane {
+  return pane.kind === "terminal";
 }
 
 /** A branch node splits two children either horizontally or vertically. */
@@ -31,7 +57,7 @@ export interface SplitBranch {
   readonly ratio: number;
 }
 
-export type SplitNode = SplitLeaf | SplitBranch;
+export type SplitNode = SplitPane | SplitBranch;
 
 export interface Workspace {
   /** Stable id for the workspace. */
@@ -40,8 +66,8 @@ export interface Workspace {
   readonly name: string;
   /** The root of the split tree. */
   readonly root: SplitNode;
-  /** The id of the leaf that currently has focus. */
-  readonly focusedLeafId: string;
+  /** The id of the pane that currently has focus. */
+  readonly focusedPaneId: string;
 }
 
 // Kept for backwards compatibility with existing call sites while the file name stays the same.
@@ -54,87 +80,98 @@ export function splitNodeId(): string {
 
 /** Collect all thread IDs present in a split tree. */
 export function collectThreadIds(node: SplitNode): ThreadId[] {
-  if (node.type === "leaf") return [node.threadId];
+  if (node.type === "pane") return isThreadPane(node) ? [node.threadId] : [];
   return [...collectThreadIds(node.children[0]), ...collectThreadIds(node.children[1])];
 }
 
-/** Count the number of leaves. */
-export function countLeaves(node: SplitNode): number {
-  if (node.type === "leaf") return 1;
-  return countLeaves(node.children[0]) + countLeaves(node.children[1]);
+/** Collect all panes (thread + terminal) in a split tree. */
+export function collectPanes(node: SplitNode): SplitPane[] {
+  if (node.type === "pane") return [node];
+  return [...collectPanes(node.children[0]), ...collectPanes(node.children[1])];
 }
 
-/** Find the leaf with a given id. */
-export function findLeaf(node: SplitNode, leafId: string): SplitLeaf | null {
-  if (node.type === "leaf") return node.id === leafId ? node : null;
-  return findLeaf(node.children[0], leafId) ?? findLeaf(node.children[1], leafId);
+/** Count the number of panes. */
+export function countPanes(node: SplitNode): number {
+  if (node.type === "pane") return 1;
+  return countPanes(node.children[0]) + countPanes(node.children[1]);
 }
 
-/** Find a leaf by thread id. */
-export function findLeafByThreadId(node: SplitNode, threadId: ThreadId): SplitLeaf | null {
-  if (node.type === "leaf") return node.threadId === threadId ? node : null;
+/** Find the pane with a given id. */
+export function findPane(node: SplitNode, paneId: string): SplitPane | null {
+  if (node.type === "pane") return node.id === paneId ? node : null;
+  return findPane(node.children[0], paneId) ?? findPane(node.children[1], paneId);
+}
+
+/** Find a pane by thread id. */
+export function findPaneByThreadId(node: SplitNode, threadId: ThreadId): SplitThreadPane | null {
+  if (node.type === "pane") return isThreadPane(node) && node.threadId === threadId ? node : null;
   return (
-    findLeafByThreadId(node.children[0], threadId) ?? findLeafByThreadId(node.children[1], threadId)
+    findPaneByThreadId(node.children[0], threadId) ?? findPaneByThreadId(node.children[1], threadId)
   );
 }
 
-/** Find the first leaf (top-left-most). */
-export function firstLeaf(node: SplitNode): SplitLeaf {
-  if (node.type === "leaf") return node;
-  return firstLeaf(node.children[0]);
+/** Find the first pane (top-left-most). */
+export function firstPane(node: SplitNode): SplitPane {
+  if (node.type === "pane") return node;
+  return firstPane(node.children[0]);
 }
 
-function replaceLeafThread(
+function replacePaneThread(
   node: SplitNode,
-  leafId: string,
+  paneId: string,
   newThreadId: ThreadId,
 ): SplitNode | null {
-  if (node.type === "leaf") {
-    if (node.id === leafId) {
+  if (node.type === "pane") {
+    if (node.id === paneId && isThreadPane(node)) {
       return { ...node, threadId: newThreadId };
     }
     return null;
   }
-  const left = replaceLeafThread(node.children[0], leafId, newThreadId);
+  const left = replacePaneThread(node.children[0], paneId, newThreadId);
   if (left) return { ...node, children: [left, node.children[1]] };
-  const right = replaceLeafThread(node.children[1], leafId, newThreadId);
+  const right = replacePaneThread(node.children[1], paneId, newThreadId);
   if (right) return { ...node, children: [node.children[0], right] };
   return null;
 }
 
-function splitLeafNode(
+function splitPaneNode(
   node: SplitNode,
-  targetLeafId: string,
-  newThreadId: ThreadId,
-  direction: SplitDirection,
-  insertBefore: boolean,
+  targetPaneId: string,
+  newPaneOrThreadId: ThreadId | SplitPane,
+  direction?: SplitDirection,
+  insertBefore?: boolean,
 ): SplitNode | null {
-  if (node.type === "leaf") {
-    if (node.id !== targetLeafId) return null;
-    const newLeaf: SplitLeaf = { type: "leaf", id: splitNodeId(), threadId: newThreadId };
-    const first = insertBefore ? newLeaf : node;
-    const second = insertBefore ? node : newLeaf;
+  if (node.type === "pane") {
+    if (node.id !== targetPaneId) return null;
+    const newPane: SplitPane =
+      typeof newPaneOrThreadId === "object"
+        ? newPaneOrThreadId
+        : { type: "pane", id: splitNodeId(), threadId: newPaneOrThreadId };
+    const dir = direction ?? "horizontal";
+    const before = insertBefore ?? false;
+    const first = before ? newPane : node;
+    const second = before ? node : newPane;
     return {
       type: "branch",
       id: splitNodeId(),
-      direction,
+      direction: dir,
       children: [first, second],
       ratio: 0.5,
     };
   }
-  const left = splitLeafNode(node.children[0], targetLeafId, newThreadId, direction, insertBefore);
+  const left = splitPaneNode(node.children[0], targetPaneId, newPaneOrThreadId, direction, insertBefore);
   if (left) return { ...node, children: [left, node.children[1]] };
-  const right = splitLeafNode(node.children[1], targetLeafId, newThreadId, direction, insertBefore);
+  const right = splitPaneNode(node.children[1], targetPaneId, newPaneOrThreadId, direction, insertBefore);
   if (right) return { ...node, children: [node.children[0], right] };
   return null;
 }
 
-function removeLeaf(node: SplitNode, leafId: string): SplitNode | null {
-  if (node.type === "leaf") {
-    return node.id === leafId ? null : node;
+function removePane(node: SplitNode, paneId: string): SplitNode | null {
+  if (node.type === "pane") {
+    return node.id === paneId ? null : node;
   }
-  const leftResult = removeLeaf(node.children[0], leafId);
-  const rightResult = removeLeaf(node.children[1], leafId);
+  const leftResult = removePane(node.children[0], paneId);
+  const rightResult = removePane(node.children[1], paneId);
   if (leftResult === node.children[0] && rightResult === node.children[1]) return node;
   if (leftResult === null) return rightResult;
   if (rightResult === null) return leftResult;
@@ -142,7 +179,7 @@ function removeLeaf(node: SplitNode, leafId: string): SplitNode | null {
 }
 
 function updateBranchRatio(node: SplitNode, branchId: string, ratio: number): SplitNode | null {
-  if (node.type === "leaf") return null;
+  if (node.type === "pane") return null;
   if (node.id === branchId) {
     return { ...node, ratio: Math.max(0.1, Math.min(0.9, ratio)) };
   }
@@ -153,16 +190,17 @@ function updateBranchRatio(node: SplitNode, branchId: string, ratio: number): Sp
   return null;
 }
 
-function pruneInvalidLeaves(
+function pruneInvalidPanes(
   node: SplitNode,
   validThreadIds: ReadonlySet<ThreadId>,
 ): SplitNode | null {
-  if (node.type === "leaf") {
+  if (node.type === "pane") {
+    if (isTerminalPane(node)) return node;
     return validThreadIds.has(node.threadId) ? node : null;
   }
 
-  const left = pruneInvalidLeaves(node.children[0], validThreadIds);
-  const right = pruneInvalidLeaves(node.children[1], validThreadIds);
+  const left = pruneInvalidPanes(node.children[0], validThreadIds);
+  const right = pruneInvalidPanes(node.children[1], validThreadIds);
   if (left === null) return right;
   if (right === null) return left;
   return { ...node, children: [left, right] };
@@ -170,38 +208,38 @@ function pruneInvalidLeaves(
 
 export type FocusDirection = "up" | "down" | "left" | "right";
 
-function computeLeafRects(
+function computePaneRects(
   node: SplitNode,
   x = 0,
   y = 0,
   w = 1,
   h = 1,
 ): Map<string, { x: number; y: number; w: number; h: number }> {
-  if (node.type === "leaf") {
+  if (node.type === "pane") {
     return new Map([[node.id, { x, y, w, h }]]);
   }
   const r = node.ratio;
   if (node.direction === "horizontal") {
     const leftW = w * r;
     const rightW = w * (1 - r);
-    const left = computeLeafRects(node.children[0], x, y, leftW, h);
-    const right = computeLeafRects(node.children[1], x + leftW, y, rightW, h);
+    const left = computePaneRects(node.children[0], x, y, leftW, h);
+    const right = computePaneRects(node.children[1], x + leftW, y, rightW, h);
     return new Map([...left, ...right]);
   }
   const topH = h * r;
   const bottomH = h * (1 - r);
-  const top = computeLeafRects(node.children[0], x, y, w, topH);
-  const bottom = computeLeafRects(node.children[1], x, y + topH, w, bottomH);
+  const top = computePaneRects(node.children[0], x, y, w, topH);
+  const bottom = computePaneRects(node.children[1], x, y + topH, w, bottomH);
   return new Map([...top, ...bottom]);
 }
 
-export function findLeafInDirection(
+export function findPaneInDirection(
   root: SplitNode,
-  currentLeafId: string,
+  currentPaneId: string,
   direction: FocusDirection,
-): SplitLeaf | null {
-  const rects = computeLeafRects(root);
-  const cur = rects.get(currentLeafId);
+): SplitPane | null {
+  const rects = computePaneRects(root);
+  const cur = rects.get(currentPaneId);
   if (!cur) return null;
 
   const isVertical = direction === "up" || direction === "down";
@@ -211,7 +249,7 @@ export function findLeafInDirection(
   let bestPrimary = Infinity;
 
   for (const [id, rect] of rects) {
-    if (id === currentLeafId) continue;
+    if (id === currentPaneId) continue;
 
     let inDirection = false;
     let primaryDist = 0;
@@ -250,7 +288,7 @@ export function findLeafInDirection(
   }
 
   if (!bestId) return null;
-  return findLeaf(root, bestId);
+  return findPane(root, bestId);
 }
 
 export type DropZone = "top" | "bottom" | "left" | "right" | "center";
@@ -319,15 +357,16 @@ function isValidWorkspace(workspace: unknown): workspace is Workspace {
   if (
     typeof candidate.id !== "string" ||
     typeof candidate.name !== "string" ||
-    typeof candidate.focusedLeafId !== "string"
+    typeof candidate.focusedPaneId !== "string"
   ) {
     return false;
   }
   if (!candidate.root || typeof candidate.root !== "object") return false;
   try {
     const root = candidate.root as SplitNode;
-    if (countLeaves(root) < 1) return false;
-    if (!findLeaf(root, candidate.focusedLeafId)) return false;
+    if (countPanes(root) < 1) return false;
+    const paneId = candidate.focusedPaneId as string;
+    if (!findPane(root, paneId)) return false;
   } catch {
     return false;
   }
@@ -363,8 +402,7 @@ function readPersistedSplitView(): PersistedSplitViewState {
     if (!raw) return null;
     const parsed = JSON.parse(raw) as PersistedSplitViewState;
     const workspaces = Array.isArray(parsed.workspaces)
-      ? parsed.workspaces.filter((workspace) => isValidWorkspace(workspace))
-      : [];
+      ? parsed.workspaces.filter((workspace) => isValidWorkspace(workspace))      : [];
     const activeWorkspace = resolveActiveWorkspace(workspaces, parsed.activeWorkspaceId ?? null);
     return {
       workspaces,
@@ -380,13 +418,13 @@ function readPersistedSplitView(): PersistedSplitViewState {
       window.localStorage.removeItem(LEGACY_SPLIT_VIEW_STORAGE_KEY);
       return null;
     }
-    const migratedWorkspace: Workspace = {
+    const legacyWorkspace: Workspace = {
       ...parsed.group,
       name: "Workspace 1",
     };
     return {
-      workspaces: [migratedWorkspace],
-      activeWorkspaceId: migratedWorkspace.id,
+      workspaces: [legacyWorkspace],
+      activeWorkspaceId: legacyWorkspace.id,
     };
   };
 
@@ -419,7 +457,7 @@ function withWorkspaceCollection(
 ): Pick<SplitViewState, "workspaces" | "activeWorkspaceId" | "group"> {
   const group = resolveActiveWorkspace(workspaces, activeWorkspaceId);
   return {
-    workspaces: [...workspaces],
+    workspaces,
     activeWorkspaceId: group?.id ?? null,
     group,
   };
@@ -446,11 +484,16 @@ function updateWorkspace(
   return changed ? next : workspaces;
 }
 
-function workspaceFocusedThreadId(workspace: Workspace): ThreadId {
-  return (
-    findLeaf(workspace.root, workspace.focusedLeafId)?.threadId ??
-    firstLeaf(workspace.root).threadId
-  );
+/** Find the first thread pane in a tree (skipping terminal panes). */
+export function firstThreadPane(node: SplitNode): SplitThreadPane | null {
+  if (node.type === "pane") return isThreadPane(node) ? node : null;
+  return firstThreadPane(node.children[0]) ?? firstThreadPane(node.children[1]);
+}
+
+function workspaceFocusedThreadId(workspace: Workspace): ThreadId | null {
+  const focused = findPane(workspace.root, workspace.focusedPaneId);
+  if (focused && isThreadPane(focused)) return focused.threadId;
+  return firstThreadPane(workspace.root)?.threadId ?? null;
 }
 
 export interface SplitViewState {
@@ -462,9 +505,11 @@ export interface SplitViewState {
    */
   group: Workspace | null;
   dragOver: {
-    leafId: string;
+    paneId: string;
     zone: DropZone;
   } | null;
+  /** The thread ID currently being dragged (set on native drag start, cleared on drag end). */
+  draggingThreadId: ThreadId | null;
   zoomed: boolean;
 }
 
@@ -475,25 +520,27 @@ export interface SplitViewActions {
     direction: SplitDirection,
     insertBefore: boolean,
   ) => void;
-  splitLeaf: (
-    leafId: string,
+  splitPane: (
+    paneId: string,
     newThreadId: ThreadId,
     direction: SplitDirection,
     insertBefore: boolean,
   ) => void;
-  closePane: (leafId: string) => ThreadId | null;
+  closePane: (paneId: string) => ThreadId | null;
   closeWorkspace: (workspaceId: string) => ThreadId | null;
   renameWorkspace: (workspaceId: string, name: string) => void;
   createWorkspace: (threadId: ThreadId) => void;
+  addTerminalPane: (cwd: string, direction?: SplitDirection) => void;
   activateWorkspace: (workspaceId: string) => ThreadId | null;
   deactivateWorkspace: () => void;
-  setFocusedLeaf: (leafId: string) => void;
+  setFocusedPane: (paneId: string) => void;
   setRatio: (branchId: string, ratio: number) => void;
-  replaceThreadInFocusedLeaf: (newThreadId: ThreadId) => void;
-  replaceThreadInLeaf: (leafId: string, newThreadId: ThreadId) => void;
+  replaceThreadInFocusedPane: (newThreadId: ThreadId) => void;
+  replaceThreadInPane: (paneId: string, newThreadId: ThreadId) => void;
   unsplit: () => ThreadId[];
-  setDragOver: (leafId: string, zone: DropZone) => void;
+  setDragOver: (paneId: string, zone: DropZone) => void;
   clearDragOver: () => void;
+  setDraggingThreadId: (threadId: ThreadId | null) => void;
   isSplit: () => boolean;
   getFocusedThreadId: () => ThreadId | null;
   focusDirection: (direction: FocusDirection) => string | null;
@@ -508,24 +555,25 @@ const persisted = readPersistedSplitView();
 export const useSplitViewStore = create<SplitViewStore>((set, get) => ({
   ...withWorkspaceCollection(persisted.workspaces, persisted.activeWorkspaceId),
   dragOver: null,
+  draggingThreadId: null,
   zoomed: false,
 
   splitThread: (currentThreadId, newThreadId, direction, insertBefore) => {
     set((state) => {
       if (currentThreadId === newThreadId) return state;
 
-      const existingLeaf: SplitLeaf = {
-        type: "leaf",
+      const existingPane: SplitPane = {
+        type: "pane",
         id: splitNodeId(),
         threadId: currentThreadId,
       };
-      const newLeaf: SplitLeaf = {
-        type: "leaf",
+      const newPane: SplitPane = {
+        type: "pane",
         id: splitNodeId(),
         threadId: newThreadId,
       };
-      const first = insertBefore ? newLeaf : existingLeaf;
-      const second = insertBefore ? existingLeaf : newLeaf;
+      const first = insertBefore ? newPane : existingPane;
+      const second = insertBefore ? existingPane : newPane;
       const root: SplitBranch = {
         type: "branch",
         id: splitNodeId(),
@@ -537,7 +585,7 @@ export const useSplitViewStore = create<SplitViewStore>((set, get) => ({
         id: root.id,
         name: buildNextWorkspaceName(state.workspaces),
         root,
-        focusedLeafId: newLeaf.id,
+        focusedPaneId: newPane.id,
       };
       return {
         ...withWorkspaceCollection([...state.workspaces, workspace], workspace.id),
@@ -546,20 +594,20 @@ export const useSplitViewStore = create<SplitViewStore>((set, get) => ({
     });
   },
 
-  splitLeaf: (leafId, newThreadId, direction, insertBefore) => {
+  splitPane: (paneId, newThreadId, direction, insertBefore) => {
     set((state) => {
       if (!state.group) return state;
-      const targetLeaf = findLeaf(state.group.root, leafId);
-      if (!targetLeaf || targetLeaf.threadId === newThreadId) return state;
-      if (findLeafByThreadId(state.group.root, newThreadId)) return state;
+      const targetPane = findPane(state.group.root, paneId);
+      if (!targetPane || (isThreadPane(targetPane) && targetPane.threadId === newThreadId)) return state;
+      if (findPaneByThreadId(state.group.root, newThreadId)) return state;
 
-      const newRoot = splitLeafNode(state.group.root, leafId, newThreadId, direction, insertBefore);
+      const newRoot = splitPaneNode(state.group.root, paneId, newThreadId, direction, insertBefore);
       if (!newRoot) return state;
-      const newLeaf = findLeafByThreadId(newRoot, newThreadId);
+      const newPane = findPaneByThreadId(newRoot, newThreadId);
       const updatedWorkspace: Workspace = {
         ...state.group,
         root: newRoot,
-        focusedLeafId: newLeaf?.id ?? state.group.focusedLeafId,
+        focusedPaneId: newPane?.id ?? state.group.focusedPaneId,
       };
       return {
         ...withWorkspaceCollection(
@@ -570,12 +618,14 @@ export const useSplitViewStore = create<SplitViewStore>((set, get) => ({
     });
   },
 
-  closePane: (leafId) => {
+  closePane: (paneId) => {
     const state = get();
     if (!state.group) return null;
 
-    const remaining = removeLeaf(state.group.root, leafId);
-    if (!remaining) {
+    const remaining = removePane(state.group.root, paneId);
+
+    // Workspace has no panes left, or reduced to a single pane — drop it.
+    if (!remaining || remaining.type === "pane") {
       const nextWorkspaces = state.workspaces.filter(
         (workspace) => workspace.id !== state.group?.id,
       );
@@ -584,15 +634,18 @@ export const useSplitViewStore = create<SplitViewStore>((set, get) => ({
         zoomed: false,
         dragOver: null,
       });
+      if (remaining && isThreadPane(remaining)) {
+        return remaining.threadId;
+      }
       return null;
     }
 
-    const needNewFocus = state.group.focusedLeafId === leafId;
-    const newFocused = needNewFocus ? firstLeaf(remaining).id : state.group.focusedLeafId;
+    const needNewFocus = state.group.focusedPaneId === paneId;
+    const newFocused = needNewFocus ? firstPane(remaining).id : state.group.focusedPaneId;
     const updatedWorkspace: Workspace = {
       ...state.group,
       root: remaining,
-      focusedLeafId: newFocused,
+      focusedPaneId: newFocused,
     };
     set({
       ...withWorkspaceCollection(
@@ -601,7 +654,8 @@ export const useSplitViewStore = create<SplitViewStore>((set, get) => ({
       ),
       zoomed: false,
     });
-    return remaining.type === "leaf" ? remaining.threadId : null;
+    const focusedPane = findPane(remaining, newFocused);
+    return focusedPane && isThreadPane(focusedPane) ? focusedPane.threadId : null;
   },
 
   closeWorkspace: (workspaceId) => {
@@ -638,19 +692,62 @@ export const useSplitViewStore = create<SplitViewStore>((set, get) => ({
 
   createWorkspace: (threadId) => {
     set((state) => {
-      const leaf: SplitLeaf = {
-        type: "leaf",
+      const pane: SplitPane = {
+        type: "pane",
         id: splitNodeId(),
         threadId,
       };
       const workspace: Workspace = {
         id: splitNodeId(),
         name: buildNextWorkspaceName(state.workspaces),
-        root: leaf,
-        focusedLeafId: leaf.id,
+        root: pane,
+        focusedPaneId: pane.id,
       };
       return {
         ...withWorkspaceCollection([...state.workspaces, workspace], workspace.id),
+        zoomed: false,
+      };
+    });
+  },
+
+  addTerminalPane: (cwd, direction) => {
+    set((state) => {
+      const terminalPane: SplitTerminalPane = {
+        type: "pane",
+        kind: "terminal",
+        id: splitNodeId(),
+        terminalId: `term_${Date.now().toString(36)}_${(++_nextId).toString(36)}`,
+        cwd,
+      };
+
+      // If no workspace exists, create one with just the terminal pane
+      if (!state.group) {
+        const workspace: Workspace = {
+          id: splitNodeId(),
+          name: buildNextWorkspaceName(state.workspaces),
+          root: terminalPane,
+          focusedPaneId: terminalPane.id,
+        };
+        return {
+          ...withWorkspaceCollection([...state.workspaces, workspace], workspace.id),
+          zoomed: false,
+        };
+      }
+
+      const focusedPane = findPane(state.group.root, state.group.focusedPaneId);
+      const targetPaneId = focusedPane?.id ?? firstPane(state.group.root).id;
+      const newRoot = splitPaneNode(state.group.root, targetPaneId, terminalPane, direction);
+      if (!newRoot) return state;
+      const updatedWorkspace: Workspace = {
+        ...state.group,
+        root: newRoot,
+        focusedPaneId: terminalPane.id,
+      };
+      return {
+        ...withWorkspaceCollection(
+          updateWorkspace(state.workspaces, state.group.id, () => updatedWorkspace),
+          state.group.id,
+        ),
         zoomed: false,
       };
     });
@@ -679,10 +776,10 @@ export const useSplitViewStore = create<SplitViewStore>((set, get) => ({
     });
   },
 
-  setFocusedLeaf: (leafId) => {
+  setFocusedPane: (paneId) => {
     set((state) => {
-      if (!state.group || state.group.focusedLeafId === leafId) return state;
-      const updatedWorkspace: Workspace = { ...state.group, focusedLeafId: leafId };
+      if (!state.group || state.group.focusedPaneId === paneId) return state;
+      const updatedWorkspace: Workspace = { ...state.group, focusedPaneId: paneId };
       return {
         ...withWorkspaceCollection(
           updateWorkspace(state.workspaces, state.group.id, () => updatedWorkspace),
@@ -707,12 +804,12 @@ export const useSplitViewStore = create<SplitViewStore>((set, get) => ({
     });
   },
 
-  replaceThreadInFocusedLeaf: (newThreadId) => {
+  replaceThreadInFocusedPane: (newThreadId) => {
     set((state) => {
       if (!state.group) return state;
-      const existing = findLeafByThreadId(state.group.root, newThreadId);
-      if (existing && existing.id !== state.group.focusedLeafId) return state;
-      const newRoot = replaceLeafThread(state.group.root, state.group.focusedLeafId, newThreadId);
+      const existing = findPaneByThreadId(state.group.root, newThreadId);
+      if (existing && existing.id !== state.group.focusedPaneId) return state;
+      const newRoot = replacePaneThread(state.group.root, state.group.focusedPaneId, newThreadId);
       if (!newRoot) return state;
       const updatedWorkspace: Workspace = { ...state.group, root: newRoot };
       return {
@@ -724,12 +821,12 @@ export const useSplitViewStore = create<SplitViewStore>((set, get) => ({
     });
   },
 
-  replaceThreadInLeaf: (leafId, newThreadId) => {
+  replaceThreadInPane: (paneId, newThreadId) => {
     set((state) => {
       if (!state.group) return state;
-      const existing = findLeafByThreadId(state.group.root, newThreadId);
-      if (existing && existing.id !== leafId) return state;
-      const newRoot = replaceLeafThread(state.group.root, leafId, newThreadId);
+      const existing = findPaneByThreadId(state.group.root, newThreadId);
+      if (existing && existing.id !== paneId) return state;
+      const newRoot = replacePaneThread(state.group.root, paneId, newThreadId);
       if (!newRoot) return state;
       const updatedWorkspace: Workspace = { ...state.group, root: newRoot };
       return {
@@ -754,12 +851,21 @@ export const useSplitViewStore = create<SplitViewStore>((set, get) => ({
     return threadIds;
   },
 
-  setDragOver: (leafId, zone) => {
-    set({ dragOver: { leafId, zone } });
+  setDragOver: (paneId, zone) => {
+    set((state) => {
+      if (state.dragOver?.paneId === paneId && state.dragOver.zone === zone) {
+        return state;
+      }
+      return { dragOver: { paneId, zone } };
+    });
   },
 
   clearDragOver: () => {
     set((state) => (state.dragOver ? { dragOver: null } : state));
+  },
+
+  setDraggingThreadId: (threadId) => {
+    set({ draggingThreadId: threadId });
   },
 
   isSplit: () => get().group !== null,
@@ -767,16 +873,17 @@ export const useSplitViewStore = create<SplitViewStore>((set, get) => ({
   getFocusedThreadId: () => {
     const state = get();
     if (!state.group) return null;
-    const leaf = findLeaf(state.group.root, state.group.focusedLeafId);
-    return leaf?.threadId ?? null;
+    const pane = findPane(state.group.root, state.group.focusedPaneId);
+    if (!pane || isTerminalPane(pane)) return null;
+    return pane.threadId;
   },
 
   focusDirection: (direction) => {
     const state = get();
     if (!state.group) return null;
-    const target = findLeafInDirection(state.group.root, state.group.focusedLeafId, direction);
+    const target = findPaneInDirection(state.group.root, state.group.focusedPaneId, direction);
     if (!target) return null;
-    const updatedWorkspace: Workspace = { ...state.group, focusedLeafId: target.id };
+    const updatedWorkspace: Workspace = { ...state.group, focusedPaneId: target.id };
     set({
       ...withWorkspaceCollection(
         updateWorkspace(state.workspaces, state.group.id, () => updatedWorkspace),
@@ -806,19 +913,18 @@ export const useSplitViewStore = create<SplitViewStore>((set, get) => ({
       return null;
     }
 
-    let activeFallbackThreadId: ThreadId | null = null;
     const nextWorkspaces: Workspace[] = [];
 
     for (const workspace of state.workspaces) {
-      const nextRoot = pruneInvalidLeaves(workspace.root, validThreadIds);
+      const nextRoot = pruneInvalidPanes(workspace.root, validThreadIds);
       if (!nextRoot) {
         continue;
       }
-      const focusedLeaf = findLeaf(nextRoot, workspace.focusedLeafId) ?? firstLeaf(nextRoot);
+      const focusedPane = findPane(nextRoot, workspace.focusedPaneId) ?? firstPane(nextRoot);
       nextWorkspaces.push({
         ...workspace,
         root: nextRoot,
-        focusedLeafId: focusedLeaf.id,
+        focusedPaneId: focusedPane.id,
       });
     }
 
@@ -832,11 +938,23 @@ export const useSplitViewStore = create<SplitViewStore>((set, get) => ({
     if (nextActiveWorkspace) {
       return workspaceFocusedThreadId(nextActiveWorkspace);
     }
-    return activeFallbackThreadId;
+    return null;
   },
 }));
 
-useSplitViewStore.subscribe((state) => debouncedPersist.maybeExecute(state));
+let _lastPersistedWorkspaces: readonly Workspace[] | null = null;
+let _lastPersistedActiveId: string | null | undefined;
+useSplitViewStore.subscribe((state) => {
+  if (
+    state.workspaces === _lastPersistedWorkspaces &&
+    state.activeWorkspaceId === _lastPersistedActiveId
+  ) {
+    return;
+  }
+  _lastPersistedWorkspaces = state.workspaces;
+  _lastPersistedActiveId = state.activeWorkspaceId;
+  debouncedPersist.maybeExecute(state);
+});
 
 if (typeof window !== "undefined") {
   window.addEventListener("beforeunload", () => {

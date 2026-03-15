@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "@tanstack/react-router";
-import { ColumnsIcon, FolderIcon, MessageSquareIcon, PlusIcon } from "lucide-react";
+import { ArrowLeftIcon, ChevronRightIcon, ColumnsIcon, FolderIcon, MessageSquareIcon, PlusIcon, TerminalSquareIcon } from "lucide-react";
 import { type ProjectId, ThreadId } from "@t3tools/contracts";
 import {
   Command,
@@ -22,7 +22,8 @@ import { useComposerDraftStore } from "../composerDraftStore";
 import { isMacPlatform, newThreadId } from "../lib/utils";
 import {
   collectThreadIds,
-  findLeafByThreadId,
+  countPanes,
+  findPaneByThreadId,
   type SplitDirection,
   useSplitViewStore,
 } from "../splitViewStore";
@@ -32,9 +33,12 @@ import type { Project, Thread } from "../types";
 
 type PaletteItem =
   | { kind: "new-thread"; project: Project }
+  | { kind: "new-thread-picker" }
   | { kind: "workspace"; workspaceId: string; name: string; threadCount: number }
   | { kind: "thread"; thread: Thread; project: Project | undefined }
-  | { kind: "project"; project: Project };
+  | { kind: "project"; project: Project }
+  | { kind: "new-terminal" }
+  | { kind: "terminal-cwd"; label: string; cwd: string };
 
 type PaletteItemGroup = {
   label: string;
@@ -45,12 +49,18 @@ function paletteItemKey(item: PaletteItem): string {
   switch (item.kind) {
     case "new-thread":
       return `new-${item.project.id}`;
+    case "new-thread-picker":
+      return "new-thread-picker";
     case "workspace":
       return `workspace-${item.workspaceId}`;
     case "thread":
       return `thread-${item.thread.id}`;
     case "project":
       return `project-${item.project.id}`;
+    case "new-terminal":
+      return "new-terminal";
+    case "terminal-cwd":
+      return `terminal-cwd-${item.cwd}`;
   }
 }
 
@@ -58,12 +68,18 @@ function paletteItemSearchText(item: PaletteItem): string {
   switch (item.kind) {
     case "new-thread":
       return `new thread ${item.project.name} ${item.project.cwd}`;
+    case "new-thread-picker":
+      return "new thread in project";
     case "workspace":
       return `workspace ${item.name} ${item.threadCount}`;
     case "thread":
       return `${item.thread.title || "untitled thread"} ${item.project?.name ?? ""} ${item.project?.cwd ?? ""}`;
     case "project":
       return `${item.project.name} ${item.project.cwd}`;
+    case "new-terminal":
+      return "new terminal";
+    case "terminal-cwd":
+      return `terminal ${item.label} ${item.cwd}`;
   }
 }
 
@@ -78,9 +94,11 @@ export function CommandPalette() {
   const open = useCommandPaletteStore((state) => state.open);
   const paletteMode = useCommandPaletteStore((state) => state.mode);
   const sourceThreadId = useCommandPaletteStore((state) => state.sourceThreadId);
-  const sourceLeafId = useCommandPaletteStore((state) => state.sourceLeafId);
+  const sourcePaneId = useCommandPaletteStore((state) => state.sourcePaneId);
   const previewThreadId = useCommandPaletteStore((state) => state.previewThreadId);
-  const previewLeafId = useCommandPaletteStore((state) => state.previewLeafId);
+  const previewPaneId = useCommandPaletteStore((state) => state.previewPaneId);
+  const previousMode = useCommandPaletteStore((state) => state.previousMode);
+  const openPalette = useCommandPaletteStore((state) => state.openPalette);
   const closePaletteStore = useCommandPaletteStore((state) => state.closePalette);
   const toggleDefaultPalette = useCommandPaletteStore((state) => state.toggleDefaultPalette);
 
@@ -93,15 +111,17 @@ export function CommandPalette() {
   });
   const splitGroup = useSplitViewStore((state) => state.group);
   const workspaces = useSplitViewStore((state) => state.workspaces);
+  const activeWorkspaceId = useSplitViewStore((state) => state.activeWorkspaceId);
   const activateWorkspace = useSplitViewStore((state) => state.activateWorkspace);
   const closePane = useSplitViewStore((state) => state.closePane);
   const createWorkspace = useSplitViewStore((state) => state.createWorkspace);
+  const addTerminalPane = useSplitViewStore((state) => state.addTerminalPane);
   const deactivateWorkspace = useSplitViewStore((state) => state.deactivateWorkspace);
   const splitThread = useSplitViewStore((state) => state.splitThread);
-  const splitLeaf = useSplitViewStore((state) => state.splitLeaf);
-  const replaceThreadInLeaf = useSplitViewStore((state) => state.replaceThreadInLeaf);
-  const replaceThreadInFocusedLeaf = useSplitViewStore((state) => state.replaceThreadInFocusedLeaf);
-  const setFocusedLeaf = useSplitViewStore((state) => state.setFocusedLeaf);
+  const splitPane = useSplitViewStore((state) => state.splitPane);
+  const replaceThreadInPane = useSplitViewStore((state) => state.replaceThreadInPane);
+  const replaceThreadInFocusedPane = useSplitViewStore((state) => state.replaceThreadInFocusedPane);
+  const setFocusedPane = useSplitViewStore((state) => state.setFocusedPane);
 
   const clearDraftThread = useComposerDraftStore((store) => store.clearDraftThread);
   const getDraftThread = useComposerDraftStore((store) => store.getDraftThread);
@@ -115,9 +135,72 @@ export function CommandPalette() {
   const projectDraftThreadIdByProjectId = useComposerDraftStore(
     (store) => store.projectDraftThreadIdByProjectId,
   );
+  const draftThreadsByThreadId = useComposerDraftStore((store) => store.draftThreadsByThreadId);
+
+  // Determine the active project from the current thread
+  const activeProject = useMemo(() => {
+    if (!routeThreadId) return null;
+    const serverThread = threads.find((t) => t.id === routeThreadId);
+    if (serverThread) {
+      return projects.find((p) => p.id === serverThread.projectId) ?? null;
+    }
+    const draftThread = draftThreadsByThreadId[routeThreadId];
+    if (draftThread?.projectId) {
+      return projects.find((p) => p.id === draftThread.projectId) ?? null;
+    }
+    return null;
+  }, [draftThreadsByThreadId, projects, routeThreadId, threads]);
 
   const itemGroups = useMemo(() => {
     const projectMap = new Map(projects.map((project) => [project.id, project]));
+
+    // In new-terminal mode, show projects and workspace thread cwds as targets
+    if (paletteMode === "new-terminal") {
+      const terminalCwdItems: PaletteItem[] = [];
+      const seenCwds = new Set<string>();
+
+      // Add all projects
+      for (const project of projects) {
+        if (!seenCwds.has(project.cwd)) {
+          seenCwds.add(project.cwd);
+          terminalCwdItems.push({
+            kind: "terminal-cwd",
+            label: project.name,
+            cwd: project.cwd,
+          });
+        }
+      }
+
+      // Add workspace threads that have a different cwd (worktrees)
+      if (splitGroup) {
+        const workspaceThreadIds = collectThreadIds(splitGroup.root);
+        for (const threadId of workspaceThreadIds) {
+          const thread = threads.find((t) => t.id === threadId);
+          if (!thread) continue;
+          const worktreePath = thread.worktreePath;
+          if (worktreePath && !seenCwds.has(worktreePath)) {
+            seenCwds.add(worktreePath);
+            terminalCwdItems.push({
+              kind: "terminal-cwd",
+              label: thread.title || "Untitled thread",
+              cwd: worktreePath,
+            });
+          }
+        }
+      }
+
+      return [{ label: "Open terminal in", items: terminalCwdItems }];
+    }
+
+    // In new-thread-project mode, show all projects as new-thread targets
+    if (paletteMode === "new-thread-project") {
+      const newThreadProjectItems: PaletteItem[] = projects.map((project) => ({
+        kind: "new-thread",
+        project,
+      }));
+      return [{ label: "New thread in", items: newThreadProjectItems }];
+    }
+
     const openThreadIds = new Set<ThreadId>();
     if (
       paletteMode === "split-right" ||
@@ -134,15 +217,17 @@ export function CommandPalette() {
       }
     }
 
-    const newThreadItems: PaletteItem[] = projects
-      .filter((project) => {
-        const draftThreadId = projectDraftThreadIdByProjectId[project.id];
-        return !draftThreadId || !openThreadIds.has(draftThreadId);
-      })
-      .map((project) => ({
-        kind: "new-thread",
-        project,
-      }));
+    // "New Thread" actions: one for the current project, plus a picker for others
+    const newThreadItems: PaletteItem[] = [];
+    if (activeProject) {
+      const draftThreadId = projectDraftThreadIdByProjectId[activeProject.id];
+      if (!draftThreadId || !openThreadIds.has(draftThreadId)) {
+        newThreadItems.push({ kind: "new-thread", project: activeProject });
+      }
+    }
+    if (projects.length > 1 || !activeProject) {
+      newThreadItems.push({ kind: "new-thread-picker" });
+    }
 
     const workspaceItems: PaletteItem[] =
       paletteMode === "split-right" || paletteMode === "split-down" || paletteMode === "new-workspace"
@@ -151,7 +236,7 @@ export function CommandPalette() {
             kind: "workspace",
             workspaceId: workspace.id,
             name: workspace.name,
-            threadCount: collectThreadIds(workspace.root).length,
+            threadCount: countPanes(workspace.root),
           }));
 
     const threadItems: PaletteItem[] = threads
@@ -168,13 +253,23 @@ export function CommandPalette() {
       project,
     }));
 
+    // Show "New Terminal" action in default mode (when workspace exists) and split modes
+    const showNewTerminal =
+      paletteMode === "default"
+        ? activeWorkspaceId !== null
+        : paletteMode === "split-right" || paletteMode === "split-down";
+    const actionItems: PaletteItem[] = showNewTerminal ? [{ kind: "new-terminal" }] : [];
+
     return [
+      ...(actionItems.length > 0 ? [{ label: "Actions", items: actionItems }] : []),
       { label: "New Thread", items: newThreadItems },
       { label: "Workspaces", items: workspaceItems },
       { label: "Threads", items: threadItems },
       { label: "Projects", items: projectItems },
     ];
   }, [
+    activeProject,
+    activeWorkspaceId,
     paletteMode,
     projectDraftThreadIdByProjectId,
     projects,
@@ -189,6 +284,20 @@ export function CommandPalette() {
     setQuery("");
     highlightedItemRef.current = null;
   }, [closePaletteStore]);
+
+  const goBack = useCallback(() => {
+    if (!previousMode) return;
+    setQuery("");
+    highlightedItemRef.current = null;
+    openPalette({
+      mode: previousMode,
+      previousMode: null,
+      sourceThreadId,
+      sourcePaneId,
+      previewThreadId,
+      previewPaneId,
+    });
+  }, [openPalette, previewPaneId, previewThreadId, previousMode, sourcePaneId, sourceThreadId]);
 
   const focusPaletteInput = useCallback(() => {
     const input = document.querySelector<HTMLInputElement>(
@@ -205,8 +314,8 @@ export function CommandPalette() {
 
   const closePalette = useCallback(() => {
     let remainingThreadId: ThreadId | null = null;
-    if (previewLeafId && previewThreadId) {
-      remainingThreadId = closePane(previewLeafId);
+    if (previewPaneId && previewThreadId) {
+      remainingThreadId = closePane(previewPaneId);
       clearDraftThread(previewThreadId);
     }
     resetPalette();
@@ -216,7 +325,7 @@ export function CommandPalette() {
         params: { threadId: remainingThreadId },
       });
     }
-  }, [clearDraftThread, closePane, navigate, previewLeafId, previewThreadId, resetPalette]);
+  }, [clearDraftThread, closePane, navigate, previewPaneId, previewThreadId, resetPalette]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -261,8 +370,17 @@ export function CommandPalette() {
     };
   }, [focusPaletteInput, open, paletteMode]);
 
+  // In sub-stage modes (project picker, terminal picker), the "real" mode
+  // is the one that spawned them — used for split direction and action routing.
+  const effectiveMode = useMemo(() => {
+    if (paletteMode === "new-thread-project" || paletteMode === "new-terminal") {
+      return previousMode ?? paletteMode;
+    }
+    return paletteMode;
+  }, [paletteMode, previousMode]);
+
   const splitDirection = useMemo<SplitDirection | null>(() => {
-    switch (paletteMode) {
+    switch (effectiveMode) {
       case "split-right":
         return "horizontal";
       case "split-down":
@@ -270,16 +388,16 @@ export function CommandPalette() {
       default:
         return null;
     }
-  }, [paletteMode]);
+  }, [effectiveMode]);
 
   const activateThread = useCallback(
     (threadId: ThreadId) => {
-      if (previewLeafId && previewThreadId) {
-        const existingLeaf = splitGroup ? findLeafByThreadId(splitGroup.root, threadId) : null;
-        if (existingLeaf && existingLeaf.id !== previewLeafId) {
-          closePane(previewLeafId);
+      if (previewPaneId && previewThreadId) {
+        const existingPane = splitGroup ? findPaneByThreadId(splitGroup.root, threadId) : null;
+        if (existingPane && existingPane.id !== previewPaneId) {
+          closePane(previewPaneId);
           clearDraftThread(previewThreadId);
-          setFocusedLeaf(existingLeaf.id);
+          setFocusedPane(existingPane.id);
           resetPalette();
           void navigate({
             to: "/$threadId",
@@ -288,7 +406,7 @@ export function CommandPalette() {
           return;
         }
 
-        replaceThreadInLeaf(previewLeafId, threadId);
+        replaceThreadInPane(previewPaneId, threadId);
         clearDraftThread(previewThreadId);
         resetPalette();
         void navigate({
@@ -302,13 +420,13 @@ export function CommandPalette() {
 
       if (splitDirection && sourceThreadId) {
         if (splitGroup) {
-          const existingLeaf = findLeafByThreadId(splitGroup.root, threadId);
-          if (existingLeaf) {
-            setFocusedLeaf(existingLeaf.id);
+          const existingPane = findPaneByThreadId(splitGroup.root, threadId);
+          if (existingPane) {
+            setFocusedPane(existingPane.id);
             return;
           }
-          if (sourceLeafId) {
-            splitLeaf(sourceLeafId, threadId, splitDirection, false);
+          if (sourcePaneId) {
+            splitPane(sourcePaneId, threadId, splitDirection, false);
             return;
           }
         }
@@ -317,17 +435,17 @@ export function CommandPalette() {
         return;
       }
 
-      if (paletteMode === "replace-focused" && splitGroup) {
-        const existingLeaf = findLeafByThreadId(splitGroup.root, threadId);
-        if (existingLeaf) {
-          setFocusedLeaf(existingLeaf.id);
+      if (effectiveMode === "replace-focused" && splitGroup) {
+        const existingPane = findPaneByThreadId(splitGroup.root, threadId);
+        if (existingPane) {
+          setFocusedPane(existingPane.id);
           void navigate({
             to: "/$threadId",
             params: { threadId },
           });
           return;
         }
-        replaceThreadInFocusedLeaf(threadId);
+        replaceThreadInFocusedPane(threadId);
         void navigate({
           to: "/$threadId",
           params: { threadId },
@@ -335,7 +453,7 @@ export function CommandPalette() {
         return;
       }
 
-      if (paletteMode === "new-workspace") {
+      if (effectiveMode === "new-workspace") {
         createWorkspace(threadId);
         void navigate({
           to: "/$threadId",
@@ -355,28 +473,21 @@ export function CommandPalette() {
       closePane,
       createWorkspace,
       deactivateWorkspace,
+      effectiveMode,
       navigate,
-      paletteMode,
-      previewLeafId,
+      previewPaneId,
       previewThreadId,
-      replaceThreadInFocusedLeaf,
-      replaceThreadInLeaf,
+      replaceThreadInFocusedPane,
+      replaceThreadInPane,
       resetPalette,
-      setFocusedLeaf,
-      sourceLeafId,
+      setFocusedPane,
+      sourcePaneId,
       sourceThreadId,
       splitDirection,
       splitGroup,
-      splitLeaf,
+      splitPane,
       splitThread,
     ],
-  );
-
-  const handleSelectThread = useCallback(
-    (threadId: ThreadId) => {
-      activateThread(threadId);
-    },
-    [activateThread],
   );
 
   const handleSelectWorkspace = useCallback(
@@ -463,18 +574,46 @@ export function CommandPalette() {
         case "new-thread":
           handleNewThread(item.project.id);
           break;
+        case "new-thread-picker":
+          // Transition to 2nd stage: pick a project for the new thread
+          setQuery("");
+          openPalette({
+            mode: "new-thread-project",
+            previousMode: paletteMode,
+            sourceThreadId,
+            sourcePaneId,
+            previewThreadId,
+            previewPaneId,
+          });
+          break;
         case "workspace":
           handleSelectWorkspace(item.workspaceId);
           break;
         case "thread":
-          handleSelectThread(item.thread.id);
+          activateThread(item.thread.id);
           break;
         case "project":
           handleSelectProject(item.project.id);
           break;
+        case "new-terminal":
+          // Transition to 2nd stage: pick a cwd
+          setQuery("");
+          openPalette({
+            mode: "new-terminal",
+            previousMode: paletteMode,
+            sourceThreadId,
+            sourcePaneId,
+            previewThreadId,
+            previewPaneId,
+          });
+          break;
+        case "terminal-cwd":
+          addTerminalPane(item.cwd, splitDirection ?? undefined);
+          resetPalette();
+          break;
       }
     },
-    [handleNewThread, handleSelectProject, handleSelectThread, handleSelectWorkspace],
+    [activateThread, addTerminalPane, handleNewThread, handleSelectProject, handleSelectWorkspace, openPalette, paletteMode, previewPaneId, previewThreadId, resetPalette, sourcePaneId, sourceThreadId, splitDirection],
   );
 
   return (
@@ -495,19 +634,46 @@ export function CommandPalette() {
             highlightedItemRef.current = isPaletteItem(item) ? item : null;
           }}
         >
-          <CommandInput
-            placeholder={
-              paletteMode === "split-right"
-                ? "Split right with a thread or project…"
-                : paletteMode === "split-down"
-                  ? "Split down with a thread or project…"
-                  : paletteMode === "replace-focused"
-                    ? "Replace the focused pane with a thread or project…"
-                    : paletteMode === "new-workspace"
-                      ? "Add a thread to a new workspace…"
-                      : "Search threads and projects…"
-            }
-          />
+          <div className="flex items-center">
+            {previousMode && (
+              <button
+                type="button"
+                className="flex-none ml-3 rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                onClick={goBack}
+                aria-label="Back"
+              >
+                <ArrowLeftIcon className="size-4" />
+              </button>
+            )}
+            <CommandInput
+              className={previousMode ? "pl-2" : undefined}
+              placeholder={
+                paletteMode === "split-right"
+                  ? "Split right with a thread or project…"
+                  : paletteMode === "split-down"
+                    ? "Split down with a thread or project…"
+                    : paletteMode === "replace-focused"
+                      ? "Replace the focused pane with a thread or project…"
+                      : paletteMode === "new-workspace"
+                        ? "Add a thread to a new workspace…"
+                        : paletteMode === "new-terminal"
+                          ? "Select a project for the terminal…"
+                          : paletteMode === "new-thread-project"
+                            ? "Select a project…"
+                            : "Search threads and projects…"
+              }
+              onKeyDown={(event) => {
+                if ((event.key === "Backspace" || event.key === "ArrowLeft") && query === "" && previousMode) {
+                  event.preventDefault();
+                  goBack();
+                }
+                if (event.key === "ArrowRight" && highlightedItemRef.current?.kind === "new-thread-picker") {
+                  event.preventDefault();
+                  handleItemClick(highlightedItemRef.current);
+                }
+              }}
+            />
+          </div>
           <CommandPanel
             onKeyDownCapture={(event: React.KeyboardEvent<HTMLDivElement>) => {
               if (event.key !== "Enter" || !highlightedItemRef.current) {
@@ -529,8 +695,20 @@ export function CommandPalette() {
             </span>
             <span>
               <kbd className="rounded border bg-muted px-1.5 py-0.5 text-[10px] font-medium">↵</kbd>{" "}
-              {splitDirection ? "split" : paletteMode === "replace-focused" ? "replace" : paletteMode === "new-workspace" ? "create workspace" : "select"}
+              {splitDirection ? "split" : effectiveMode === "replace-focused" ? "replace" : effectiveMode === "new-workspace" ? "create workspace" : "select"}
             </span>
+            {previousMode && (
+              <span>
+                <kbd className="rounded border bg-muted px-1.5 py-0.5 text-[10px] font-medium">
+                  ←
+                </kbd>
+                <span className="mx-0.5 text-muted-foreground/60">/</span>
+                <kbd className="rounded border bg-muted px-1.5 py-0.5 text-[10px] font-medium">
+                  ⌫
+                </kbd>{" "}
+                back
+              </span>
+            )}
             <span>
               <kbd className="rounded border bg-muted px-1.5 py-0.5 text-[10px] font-medium">
                 esc
@@ -583,6 +761,14 @@ function PaletteItemContent({ item }: { item: PaletteItem }) {
           </span>
         </>
       );
+    case "new-thread-picker":
+      return (
+        <>
+          <PlusIcon className="mr-2 size-4 shrink-0 text-muted-foreground" />
+          <span className="min-w-0 flex-1 truncate">New thread in…</span>
+          <ChevronRightIcon className="ml-auto size-4 shrink-0 text-muted-foreground" />
+        </>
+      );
     case "thread":
       return (
         <>
@@ -604,7 +790,7 @@ function PaletteItemContent({ item }: { item: PaletteItem }) {
           <div className="min-w-0 flex-1">
             <span className="block truncate">{item.name}</span>
             <span className="block truncate text-xs text-muted-foreground">
-              {item.threadCount} {item.threadCount === 1 ? "thread" : "threads"}
+              {item.threadCount} {item.threadCount === 1 ? "pane" : "panes"}
             </span>
           </div>
         </>
@@ -616,6 +802,23 @@ function PaletteItemContent({ item }: { item: PaletteItem }) {
           <div className="min-w-0 flex-1">
             <span className="block truncate">{item.project.name}</span>
             <span className="block truncate text-xs text-muted-foreground">{item.project.cwd}</span>
+          </div>
+        </>
+      );
+    case "new-terminal":
+      return (
+        <>
+          <TerminalSquareIcon className="mr-2 size-4 shrink-0 text-muted-foreground" />
+          <span className="truncate">New terminal</span>
+        </>
+      );
+    case "terminal-cwd":
+      return (
+        <>
+          <TerminalSquareIcon className="mr-2 size-4 shrink-0 text-muted-foreground" />
+          <div className="min-w-0 flex-1">
+            <span className="block truncate">{item.label}</span>
+            <span className="block truncate text-xs text-muted-foreground">{item.cwd}</span>
           </div>
         </>
       );

@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { ThreadId } from "@t3tools/contracts";
 
-import { findLeafByThreadId, useSplitViewStore } from "./splitViewStore";
+import { findPaneByThreadId, useSplitViewStore } from "./splitViewStore";
 
 const THREAD_A = ThreadId.makeUnsafe("thread-a");
 const THREAD_B = ThreadId.makeUnsafe("thread-b");
@@ -56,10 +56,10 @@ describe("splitViewStore workspaces", () => {
     const activeWorkspace = useSplitViewStore.getState().group;
     expect(activeWorkspace).not.toBeNull();
 
-    const closingLeaf = findLeafByThreadId(activeWorkspace!.root, THREAD_B);
-    expect(closingLeaf).not.toBeNull();
+    const closingPane = findPaneByThreadId(activeWorkspace!.root, THREAD_B);
+    expect(closingPane).not.toBeNull();
 
-    const fallbackThreadId = useSplitViewStore.getState().closePane(closingLeaf!.id);
+    const fallbackThreadId = useSplitViewStore.getState().closePane(closingPane!.id);
     const state = useSplitViewStore.getState();
 
     expect(fallbackThreadId).toBe(THREAD_A);

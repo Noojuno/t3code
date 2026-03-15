@@ -8,18 +8,22 @@ import {
 import type { ThreadId } from "@t3tools/contracts";
 import {
   type SplitNode,
-  type SplitLeaf,
+  type SplitPane,
   type SplitBranch,
+  type SplitTerminalPane,
   type DropZone,
   computeClosestDropZone,
+  isThreadPane,
+  isTerminalPane,
   useSplitViewStore,
-  findLeaf,
+  findPane,
+  findPaneByThreadId,
 } from "../splitViewStore";
 
 // ── Shared callback types ───────────────────────────────────────────
 
 type SplitDropHandler = (
-  leafId: string,
+  paneId: string,
   threadId: ThreadId | null,
   projectId: string | null,
   zone: DropZone,
@@ -155,44 +159,49 @@ export function SplitDropPreview({
   );
 }
 
-// ── Leaf pane ───────────────────────────────────────────────────────
+// ── Pane ─────────────────────────────────────────────────────────────
 
-interface LeafPaneProps {
-  leaf: SplitLeaf;
+interface PaneProps {
+  pane: SplitPane;
   isFocused: boolean;
   isZoomed: boolean;
+  isSinglePane: boolean;
   showDropZones: boolean;
-  renderThread: (threadId: ThreadId, leafId: string) => ReactNode;
+  renderThread: (threadId: ThreadId, paneId: string) => ReactNode;
+  renderTerminal: ((pane: SplitTerminalPane) => ReactNode) | undefined;
   onSplitDrop: SplitDropHandler | undefined;
 }
 
-function LeafPane({
-  leaf,
+function SplitPaneView({
+  pane,
   isFocused,
   isZoomed,
+  isSinglePane,
   showDropZones,
   renderThread,
+  renderTerminal,
   onSplitDrop,
-}: LeafPaneProps) {
-  const setFocusedLeaf = useSplitViewStore((s) => s.setFocusedLeaf);
+}: PaneProps) {
+  const setFocusedPane = useSplitViewStore((s) => s.setFocusedPane);
   const setDragOver = useSplitViewStore((s) => s.setDragOver);
-  const dragOver = useSplitViewStore((s) => s.dragOver);
   const clearDragOver = useSplitViewStore((s) => s.clearDragOver);
-  const activeZone = dragOver?.leafId === leaf.id ? dragOver.zone : null;
+  const activeZone = useSplitViewStore(
+    (s) => (s.dragOver?.paneId === pane.id ? s.dragOver.zone : null),
+  );
 
   return (
     <div
-      data-split-leaf-id={leaf.id}
+      data-split-pane-id={pane.id}
       tabIndex={-1}
-      className={`group/split-pane relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden rounded-lg bg-background transition-opacity duration-150 ${
-        isZoomed
+      className={`group/split-pane relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background transition-opacity duration-150 ${
+        isSinglePane || isZoomed
           ? "opacity-100"
           : isFocused
-            ? "ring-2 ring-primary/30 ring-inset opacity-100"
-            : "opacity-60"
+            ? "rounded-lg ring-2 ring-primary/30 ring-inset opacity-100"
+            : "rounded-lg opacity-60"
       }`}
-      onMouseDown={() => setFocusedLeaf(leaf.id)}
-      onFocus={() => setFocusedLeaf(leaf.id)}
+      onMouseDown={() => setFocusedPane(pane.id)}
+      onFocus={() => setFocusedPane(pane.id)}
       onDragOver={(e) => {
         e.preventDefault();
       }}
@@ -217,9 +226,9 @@ function LeafPane({
         const droppedProjectId = e.dataTransfer.getData("application/t3-project-id") || null;
         const dragType = e.dataTransfer.getData("application/t3-drag-type");
         if (dragType === "project") {
-          onSplitDrop(leaf.id, null, droppedProjectId, zone);
+          onSplitDrop(pane.id, null, droppedProjectId, zone);
         } else if (droppedThreadId) {
-          onSplitDrop(leaf.id, droppedThreadId as ThreadId, droppedProjectId, zone);
+          onSplitDrop(pane.id, droppedThreadId as ThreadId, droppedProjectId, zone);
         }
       }}
     >
@@ -232,11 +241,17 @@ function LeafPane({
             e.stopPropagation();
             const rect = e.currentTarget.getBoundingClientRect();
             const zone = computeClosestDropZone(e.clientX, e.clientY, rect);
-            setDragOver(leaf.id, zone);
+            setDragOver(pane.id, zone);
           }}
         />
       )}
-      <SplitDropPreview zone={activeZone}>{renderThread(leaf.threadId, leaf.id)}</SplitDropPreview>
+      <SplitDropPreview zone={activeZone}>
+        {isTerminalPane(pane) && renderTerminal
+          ? renderTerminal(pane)
+          : isThreadPane(pane)
+            ? renderThread(pane.threadId, pane.id)
+            : null}
+      </SplitDropPreview>
     </div>
   );
 }
@@ -245,17 +260,21 @@ function LeafPane({
 
 interface BranchPaneProps {
   branch: SplitBranch;
-  focusedLeafId: string;
+  focusedPaneId: string;
+  isSinglePane: boolean;
   showDropZones: boolean;
-  renderThread: (threadId: ThreadId, leafId: string) => ReactNode;
+  renderThread: (threadId: ThreadId, paneId: string) => ReactNode;
+  renderTerminal: ((pane: SplitTerminalPane) => ReactNode) | undefined;
   onSplitDrop: SplitDropHandler | undefined;
 }
 
 function BranchPane({
   branch,
-  focusedLeafId,
+  focusedPaneId,
+  isSinglePane,
   showDropZones,
   renderThread,
+  renderTerminal,
   onSplitDrop,
 }: BranchPaneProps) {
   const isHorizontal = branch.direction === "horizontal";
@@ -274,9 +293,11 @@ function BranchPane({
       >
         <SplitPanelNode
           node={branch.children[0]}
-          focusedLeafId={focusedLeafId}
+          focusedPaneId={focusedPaneId}
+          isSinglePane={false}
           showDropZones={showDropZones}
           renderThread={renderThread}
+          renderTerminal={renderTerminal}
           onSplitDrop={onSplitDrop}
         />
       </div>
@@ -291,9 +312,11 @@ function BranchPane({
       >
         <SplitPanelNode
           node={branch.children[1]}
-          focusedLeafId={focusedLeafId}
+          focusedPaneId={focusedPaneId}
+          isSinglePane={false}
           showDropZones={showDropZones}
           renderThread={renderThread}
+          renderTerminal={renderTerminal}
           onSplitDrop={onSplitDrop}
         />
       </div>
@@ -305,27 +328,33 @@ function BranchPane({
 
 interface SplitPanelNodeProps {
   node: SplitNode;
-  focusedLeafId: string;
+  focusedPaneId: string;
+  isSinglePane: boolean;
   showDropZones: boolean;
-  renderThread: (threadId: ThreadId, leafId: string) => ReactNode;
+  renderThread: (threadId: ThreadId, paneId: string) => ReactNode;
+  renderTerminal: ((pane: SplitTerminalPane) => ReactNode) | undefined;
   onSplitDrop: SplitDropHandler | undefined;
 }
 
 function SplitPanelNode({
   node,
-  focusedLeafId,
+  focusedPaneId,
+  isSinglePane,
   showDropZones,
   renderThread,
+  renderTerminal,
   onSplitDrop,
 }: SplitPanelNodeProps) {
-  if (node.type === "leaf") {
+  if (node.type === "pane") {
     return (
-      <LeafPane
-        leaf={node}
-        isFocused={node.id === focusedLeafId}
+      <SplitPaneView
+        pane={node}
+        isFocused={node.id === focusedPaneId}
         isZoomed={false}
+        isSinglePane={isSinglePane}
         showDropZones={showDropZones}
         renderThread={renderThread}
+        renderTerminal={renderTerminal}
         onSplitDrop={onSplitDrop}
       />
     );
@@ -333,9 +362,11 @@ function SplitPanelNode({
   return (
     <BranchPane
       branch={node}
-      focusedLeafId={focusedLeafId}
+      focusedPaneId={focusedPaneId}
+      isSinglePane={isSinglePane}
       showDropZones={showDropZones}
       renderThread={renderThread}
+      renderTerminal={renderTerminal}
       onSplitDrop={onSplitDrop}
     />
   );
@@ -344,35 +375,51 @@ function SplitPanelNode({
 // ── Root component ──────────────────────────────────────────────────
 
 export interface SplitPanelRootProps {
-  renderThread: (threadId: ThreadId, leafId: string) => ReactNode;
+  renderThread: (threadId: ThreadId, paneId: string) => ReactNode;
+  renderTerminal: ((pane: SplitTerminalPane) => ReactNode) | undefined;
   /**
-   * Called when a thread/project is dropped on a leaf's drop zone.
+   * Called when a thread/project is dropped on a pane's drop zone.
    * threadId is null when a project (not thread) is dragged (caller should create a new thread).
    */
   onSplitDrop: SplitDropHandler | undefined;
 }
 
-export function SplitPanelRoot({ renderThread, onSplitDrop }: SplitPanelRootProps) {
+export function SplitPanelRoot({ renderThread, renderTerminal, onSplitDrop }: SplitPanelRootProps) {
   const group = useSplitViewStore((s) => s.group);
   const zoomed = useSplitViewStore((s) => s.zoomed);
+  const draggingThreadId = useSplitViewStore((s) => s.draggingThreadId);
   const [showDropZones, setShowDropZones] = useState(false);
   const dragCountRef = useRef(0);
 
   if (!group) return null;
 
-  // When zoomed, only render the focused leaf at full size
-  const zoomedLeaf = zoomed ? findLeaf(group.root, group.focusedLeafId) : null;
+  // Suppress drop zones when dragging a thread that's already in the workspace
+  const isDraggingExistingThread =
+    draggingThreadId !== null && findPaneByThreadId(group.root, draggingThreadId) !== null;
+
+  const isSinglePane = group.root.type === "pane";
+
+  // When zoomed, only render the focused pane at full size
+  const zoomedPane = zoomed ? findPane(group.root, group.focusedPaneId) : null;
+
+  const effectiveShowDropZones = showDropZones && !isDraggingExistingThread;
+
+  const isFullBleed = (isSinglePane || zoomed) && !effectiveShowDropZones;
 
   return (
     <div
-      className="flex h-full min-h-0 w-full min-w-0 overflow-hidden"
+      className={`flex min-h-0 min-w-0 overflow-hidden ${
+        isFullBleed ? "absolute inset-0 bg-background" : "h-full w-full"
+      }`}
       onDragEnter={(e) => {
         if (
           e.dataTransfer.types.includes("application/t3-thread-id") ||
           e.dataTransfer.types.includes("application/t3-project-id")
         ) {
           dragCountRef.current++;
-          setShowDropZones(true);
+          if (!isDraggingExistingThread) {
+            setShowDropZones(true);
+          }
         }
       }}
       onDragLeave={() => {
@@ -391,21 +438,25 @@ export function SplitPanelRoot({ renderThread, onSplitDrop }: SplitPanelRootProp
         e.preventDefault();
       }}
     >
-      {zoomedLeaf ? (
-        <LeafPane
-          leaf={zoomedLeaf}
+      {zoomedPane ? (
+        <SplitPaneView
+          pane={zoomedPane}
           isFocused
           isZoomed
-          showDropZones={showDropZones}
+          isSinglePane={isSinglePane && !effectiveShowDropZones}
+          showDropZones={effectiveShowDropZones}
           renderThread={renderThread}
+          renderTerminal={renderTerminal}
           onSplitDrop={onSplitDrop}
         />
       ) : (
         <SplitPanelNode
           node={group.root}
-          focusedLeafId={group.focusedLeafId}
-          showDropZones={showDropZones}
+          focusedPaneId={group.focusedPaneId}
+          isSinglePane={isSinglePane && !effectiveShowDropZones}
+          showDropZones={effectiveShowDropZones}
           renderThread={renderThread}
+          renderTerminal={renderTerminal}
           onSplitDrop={onSplitDrop}
         />
       )}

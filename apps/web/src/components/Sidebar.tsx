@@ -10,6 +10,7 @@ import {
   SettingsIcon,
   SquarePenIcon,
   TerminalIcon,
+  TerminalSquareIcon,
   TriangleAlertIcon,
   XIcon,
 } from "lucide-react";
@@ -98,9 +99,14 @@ import { useThreadSelectionStore } from "../threadSelectionStore";
 import {
   useSplitViewStore,
   collectThreadIds,
-  findLeaf,
-  findLeafByThreadId,
-  firstLeaf,
+  collectPanes,
+  countPanes,
+  findPane,
+  findPaneByThreadId,
+  firstThreadPane,
+  isThreadPane,
+  isTerminalPane,
+  type SplitTerminalPane,
 } from "../splitViewStore";
 import { formatWorktreePathForDisplay, getOrphanedWorktreePathForThread } from "../worktreeCleanup";
 import { isNonEmpty as isNonEmptyString } from "effect/String";
@@ -198,6 +204,7 @@ function SidebarThreadRow({
   onKeyDown,
   onContextMenu,
   onDragStart,
+  onDragEnd,
   onOpenPr,
   relativeTimeLabel,
 }: {
@@ -214,6 +221,7 @@ function SidebarThreadRow({
   onKeyDown?: (event: ReactKeyboardEvent<HTMLAnchorElement>) => void;
   onContextMenu?: (event: ReactMouseEvent<HTMLAnchorElement>) => void;
   onDragStart?: ReactDragEventHandler<HTMLLIElement>;
+  onDragEnd?: ReactDragEventHandler<HTMLLIElement>;
   onOpenPr: (event: ReactMouseEvent<HTMLElement>, prUrl: string) => void;
   relativeTimeLabel: string;
 }) {
@@ -224,6 +232,7 @@ function SidebarThreadRow({
       data-thread-item={dataThreadItem || undefined}
       draggable={draggable}
       onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
     >
       <SidebarMenuSubButton
         render={<div role="button" tabIndex={0} />}
@@ -460,7 +469,8 @@ export default function Sidebar() {
   const renameWorkspace = useSplitViewStore((s) => s.renameWorkspace);
   const activateWorkspaceById = useSplitViewStore((s) => s.activateWorkspace);
   const deactivateWorkspace = useSplitViewStore((s) => s.deactivateWorkspace);
-  const setFocusedLeaf = useSplitViewStore((s) => s.setFocusedLeaf);
+  const setFocusedPane = useSplitViewStore((s) => s.setFocusedPane);
+  const setDraggingThreadId = useSplitViewStore((s) => s.setDraggingThreadId);
   const isSplitView = activeWorkspaceId !== null;
   const workspaceThreadIds = useMemo(() => {
     const next = new Set<ThreadId>();
@@ -1508,10 +1518,14 @@ export default function Sidebar() {
               {workspaces.map((workspace) => {
                 const isExpanded = expandedWorkspaceIds.has(workspace.id);
                 const workspaceThreadIds = collectThreadIds(workspace.root);
+                const workspacePanes = collectPanes(workspace.root);
+                const totalPaneCount = countPanes(workspace.root);
                 const isWorkspaceActive = activeWorkspaceId === workspace.id && isSplitView;
+                const focusedPane = findPane(workspace.root, workspace.focusedPaneId);
                 const workspaceFocusedThreadId =
-                  findLeaf(workspace.root, workspace.focusedLeafId)?.threadId ??
-                  firstLeaf(workspace.root).threadId;
+                  (focusedPane && isThreadPane(focusedPane) ? focusedPane.threadId : null) ??
+                  firstThreadPane(workspace.root)?.threadId ??
+                  null;
 
                 return (
                   <SidebarMenuItem key={workspace.id}>
@@ -1585,7 +1599,7 @@ export default function Sidebar() {
                             </span>
                           )}
                           <span className="shrink-0 text-[10px] text-muted-foreground/60">
-                            {workspaceThreadIds.length}
+                            {totalPaneCount}
                           </span>
                         </SidebarMenuButton>
                         <Tooltip>
@@ -1617,12 +1631,71 @@ export default function Sidebar() {
 
                       <CollapsibleContent keepMounted>
                         <SidebarMenuSub className="mx-1 my-0 w-full translate-x-0 gap-0.5 px-1.5 py-0">
-                          {workspaceThreadIds.map((tid) => {
+                          {workspacePanes.map((wsPane) => {
+                            if (isTerminalPane(wsPane)) {
+                              const termPane = wsPane as SplitTerminalPane;
+                              const isFocused = isWorkspaceActive && workspace.focusedPaneId === termPane.id;
+                              return (
+                                <SidebarThreadRow
+                                  key={`${workspace.id}:terminal:${termPane.terminalId}`}
+                                  title={
+                                    <span className="min-w-0 flex-1 truncate text-xs">
+                                      <TerminalSquareIcon className="-mt-px mr-1 inline size-3 text-muted-foreground" />
+                                      {termPane.cwd.split("/").pop() || "Terminal"}
+                                    </span>
+                                  }
+                                  titleSuffix={
+                                    splitZoomed && isFocused ? (
+                                      <SearchIcon className="size-3 shrink-0 text-primary/60" />
+                                    ) : undefined
+                                  }
+                                  threadStatus={null}
+                                  terminalStatus={null}
+                                  prStatus={null}
+                                  isActive={isFocused}
+                                  relativeTimeLabel=""
+                                  onOpenPr={openPrLink}
+                                  onClick={() => {
+                                    activateWorkspaceById(workspace.id);
+                                    setFocusedPane(termPane.id);
+                                  }}
+                                  onKeyDown={(event) => {
+                                    if (event.key !== "Enter" && event.key !== " ") return;
+                                    event.preventDefault();
+                                    activateWorkspaceById(workspace.id);
+                                    setFocusedPane(termPane.id);
+                                  }}
+                                  onContextMenu={(event) => {
+                                    event.preventDefault();
+                                    const api = readNativeApi();
+                                    if (!api) return;
+                                    void api.contextMenu
+                                      .show([{ id: "close-pane", label: "Close this pane" }], {
+                                        x: event.clientX,
+                                        y: event.clientY,
+                                      })
+                                      .then((clicked) => {
+                                        if (clicked !== "close-pane") return;
+                                        activateWorkspaceById(workspace.id);
+                                        const remaining = closePane(termPane.id);
+                                        if (remaining) {
+                                          void navigate({
+                                            to: "/$threadId",
+                                            params: { threadId: remaining },
+                                          });
+                                        }
+                                      });
+                                  }}
+                                />
+                              );
+                            }
+
+                            const tid = wsPane.threadId;
                             const thread = threads.find((t) => t.id === tid);
                             const draftThread = thread ? null : getDraftThread(tid);
                             if (!thread && !draftThread) return null;
                             const isFocused = isWorkspaceActive && workspaceFocusedThreadId === tid;
-                            const leaf = findLeafByThreadId(workspace.root, tid);
+                            const pane = findPaneByThreadId(workspace.root, tid);
                             const threadStatus = thread
                               ? resolveThreadStatusPill({
                                   thread,
@@ -1667,8 +1740,8 @@ export default function Sidebar() {
                                 onOpenPr={openPrLink}
                                 onClick={() => {
                                   activateWorkspaceById(workspace.id);
-                                  if (leaf) {
-                                    setFocusedLeaf(leaf.id);
+                                  if (pane) {
+                                    setFocusedPane(pane.id);
                                   }
                                   void navigate({
                                     to: "/$threadId",
@@ -1679,8 +1752,8 @@ export default function Sidebar() {
                                   if (event.key !== "Enter" && event.key !== " ") return;
                                   event.preventDefault();
                                   activateWorkspaceById(workspace.id);
-                                  if (leaf) {
-                                    setFocusedLeaf(leaf.id);
+                                  if (pane) {
+                                    setFocusedPane(pane.id);
                                   }
                                   void navigate({
                                     to: "/$threadId",
@@ -1697,9 +1770,9 @@ export default function Sidebar() {
                                       y: event.clientY,
                                     })
                                     .then((clicked) => {
-                                      if (clicked !== "close-pane" || !leaf) return;
+                                      if (clicked !== "close-pane" || !pane) return;
                                       activateWorkspaceById(workspace.id);
-                                      const remaining = closePane(leaf.id);
+                                      const remaining = closePane(pane.id);
                                       if (remaining) {
                                         void navigate({
                                           to: "/$threadId",
@@ -2007,6 +2080,10 @@ export default function Sidebar() {
                                         project.id,
                                       );
                                       e.dataTransfer.effectAllowed = "move";
+                                      setDraggingThreadId(thread.id as ThreadId);
+                                    }}
+                                    onDragEnd={() => {
+                                      setDraggingThreadId(null);
                                     }}
                                     relativeTimeLabel={formatRelativeTime(thread.createdAt)}
                                     onOpenPr={openPrLink}

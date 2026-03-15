@@ -1,24 +1,27 @@
 import type { ThreadId } from "@t3tools/contracts";
 import { create } from "zustand";
 
-export type CommandPaletteMode = "default" | "split-right" | "split-down" | "replace-focused" | "new-workspace";
+export type CommandPaletteMode = "default" | "split-right" | "split-down" | "replace-focused" | "new-workspace" | "new-terminal" | "new-thread-project";
 
 interface CommandPaletteState {
   open: boolean;
   mode: CommandPaletteMode;
+  /** The mode to return to when pressing back from a sub-stage (e.g. project picker). */
+  previousMode: CommandPaletteMode | null;
   sourceThreadId: ThreadId | null;
-  sourceLeafId: string | null;
+  sourcePaneId: string | null;
   previewThreadId: ThreadId | null;
-  previewLeafId: string | null;
+  previewPaneId: string | null;
 }
 
 interface CommandPaletteStore extends CommandPaletteState {
   openPalette: (options?: {
     mode?: CommandPaletteMode;
+    previousMode?: CommandPaletteMode | null;
     sourceThreadId?: ThreadId | null;
-    sourceLeafId?: string | null;
+    sourcePaneId?: string | null;
     previewThreadId?: ThreadId | null;
-    previewLeafId?: string | null;
+    previewPaneId?: string | null;
   }) => void;
   closePalette: () => void;
   toggleDefaultPalette: () => void;
@@ -27,10 +30,11 @@ interface CommandPaletteStore extends CommandPaletteState {
 const DEFAULT_STATE: CommandPaletteState = {
   open: false,
   mode: "default",
+  previousMode: null,
   sourceThreadId: null,
-  sourceLeafId: null,
+  sourcePaneId: null,
   previewThreadId: null,
-  previewLeafId: null,
+  previewPaneId: null,
 };
 
 export const useCommandPaletteStore = create<CommandPaletteStore>((set, get) => ({
@@ -40,10 +44,11 @@ export const useCommandPaletteStore = create<CommandPaletteStore>((set, get) => 
     set({
       open: true,
       mode: options?.mode ?? "default",
+      previousMode: options?.previousMode ?? null,
       sourceThreadId: options?.sourceThreadId ?? null,
-      sourceLeafId: options?.sourceLeafId ?? null,
+      sourcePaneId: options?.sourcePaneId ?? null,
       previewThreadId: options?.previewThreadId ?? null,
-      previewLeafId: options?.previewLeafId ?? null,
+      previewPaneId: options?.previewPaneId ?? null,
     });
   },
 
@@ -64,10 +69,11 @@ export const useCommandPaletteStore = create<CommandPaletteStore>((set, get) => 
     set({
       open: true,
       mode: "default",
+      previousMode: null,
       sourceThreadId: null,
-      sourceLeafId: null,
+      sourcePaneId: null,
       previewThreadId: null,
-      previewLeafId: null,
+      previewPaneId: null,
     });
   },
 }));

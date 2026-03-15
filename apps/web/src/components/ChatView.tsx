@@ -215,7 +215,7 @@ import {
 } from "~/projectScripts";
 import { Toggle } from "./ui/toggle";
 import { SidebarTrigger } from "./ui/sidebar";
-import { findLeaf, findLeafByThreadId, useSplitViewStore } from "../splitViewStore";
+import { findPane, findPaneByThreadId, useSplitViewStore } from "../splitViewStore";
 import { newCommandId, newMessageId, newThreadId } from "~/lib/utils";
 import { readNativeApi } from "~/nativeApi";
 import { getAppModelOptions, resolveAppModelSelection, useAppSettings } from "../appSettings";
@@ -813,13 +813,13 @@ export default function ChatView({ threadId, onCloseSplitPane }: ChatViewProps) 
       }
 
       const splitStore = useSplitViewStore.getState();
-      const sourceLeafId = splitStore.group?.focusedLeafId ?? null;
+      const sourcePaneId = splitStore.group?.focusedPaneId ?? null;
       const previewProjectId = activeProject?.id ?? activeThread?.projectId ?? null;
       if (!previewProjectId) {
         openCommandPalette({
           mode,
           sourceThreadId: activeThreadId,
-          sourceLeafId,
+          sourcePaneId,
         });
         return;
       }
@@ -835,23 +835,23 @@ export default function ChatView({ threadId, onCloseSplitPane }: ChatViewProps) 
       });
 
       const direction = mode === "split-right" ? "horizontal" : "vertical";
-      if (splitStore.group && sourceLeafId) {
-        splitStore.splitLeaf(sourceLeafId, previewThreadId, direction, false);
+      if (splitStore.group && sourcePaneId) {
+        splitStore.splitPane(sourcePaneId, previewThreadId, direction, false);
       } else {
         splitStore.splitThread(activeThreadId, previewThreadId, direction, false);
       }
 
       const previewGroup = useSplitViewStore.getState().group;
-      const previewLeafId = previewGroup
-        ? (findLeafByThreadId(previewGroup.root, previewThreadId)?.id ?? null)
+      const previewPaneId = previewGroup
+        ? (findPaneByThreadId(previewGroup.root, previewThreadId)?.id ?? null)
         : null;
 
       openCommandPalette({
         mode,
         sourceThreadId: activeThreadId,
-        sourceLeafId,
+        sourcePaneId,
         previewThreadId,
-        previewLeafId,
+        previewPaneId,
       });
     },
     [
@@ -874,7 +874,7 @@ export default function ChatView({ threadId, onCloseSplitPane }: ChatViewProps) 
     openCommandPalette({
       mode: "replace-focused",
       sourceThreadId: activeThreadId,
-      sourceLeafId: splitStore.group.focusedLeafId,
+      sourcePaneId: splitStore.group.focusedPaneId,
     });
   }, [activeThreadId, openCommandPalette]);
 
@@ -1590,7 +1590,7 @@ export default function ChatView({ threadId, onCloseSplitPane }: ChatViewProps) 
     return activeElement.closest(".thread-terminal-drawer .xterm") !== null;
   }, []);
   const focusSplitPaneElement = useCallback(
-    (leafId: string, targetThreadId: ThreadId, preferTerminal: boolean) => {
+    (paneId: string, targetThreadId: ThreadId, preferTerminal: boolean) => {
       window.requestAnimationFrame(() => {
         if (preferTerminal) {
           const targetTerminalState = selectThreadTerminalState(
@@ -1603,7 +1603,7 @@ export default function ChatView({ threadId, onCloseSplitPane }: ChatViewProps) 
           }
         }
 
-        const paneEl = document.querySelector<HTMLElement>(`[data-split-leaf-id="${leafId}"]`);
+        const paneEl = document.querySelector<HTMLElement>(`[data-split-pane-id="${paneId}"]`);
         if (!paneEl) return;
         const editor = paneEl.querySelector<HTMLElement>("[contenteditable=true]");
         if (editor) {
@@ -1619,13 +1619,15 @@ export default function ChatView({ threadId, onCloseSplitPane }: ChatViewProps) 
     const splitStore = useSplitViewStore.getState();
     if (!splitStore.group) return false;
     const exitingZoom = splitStore.zoomed;
-    const focusedLeafId = splitStore.group.focusedLeafId;
+    const focusedPaneId = splitStore.group.focusedPaneId;
     const preferTerminal = isTerminalFocused();
     splitStore.toggleZoom();
     if (exitingZoom) {
-      const focusedLeaf = findLeaf(splitStore.group.root, focusedLeafId);
-      if (focusedLeaf) {
-        focusSplitPaneElement(focusedLeafId, focusedLeaf.threadId, preferTerminal);
+      const focusedPane = findPane(splitStore.group.root, focusedPaneId);
+      if (focusedPane) {
+        if ("threadId" in focusedPane) {
+          focusSplitPaneElement(focusedPaneId, focusedPane.threadId, preferTerminal);
+        }
       }
     }
     return true;
@@ -2550,11 +2552,11 @@ export default function ChatView({ threadId, onCloseSplitPane }: ChatViewProps) 
               event.preventDefault();
               event.stopPropagation();
               const wasTerminalFocused = shortcutContext.terminalFocus;
-              const newLeafId = splitStore.focusDirection(direction);
-              if (newLeafId) {
-                const targetLeaf = findLeaf(splitStore.group.root, newLeafId);
-                if (targetLeaf) {
-                  focusSplitPaneElement(newLeafId, targetLeaf.threadId, wasTerminalFocused);
+              const newPaneId = splitStore.focusDirection(direction);
+              if (newPaneId) {
+                const targetPane = findPane(splitStore.group.root, newPaneId);
+                if (targetPane && "threadId" in targetPane) {
+                  focusSplitPaneElement(newPaneId, targetPane.threadId, wasTerminalFocused);
                 }
               }
               return;
@@ -4669,25 +4671,27 @@ const ThreadErrorBanner = memo(function ThreadErrorBanner({
 }) {
   if (!error) return null;
   return (
-    <div className="pt-3 mx-auto max-w-3xl">
-      <Alert variant="error">
-        <CircleAlertIcon />
-        <AlertDescription className="line-clamp-3" title={error}>
-          {error}
-        </AlertDescription>
-        {onDismiss && (
-          <AlertAction>
-            <button
-              type="button"
-              aria-label="Dismiss error"
-              className="inline-flex size-6 items-center justify-center rounded-md text-destructive/60 transition-colors hover:text-destructive"
-              onClick={onDismiss}
-            >
-              <XIcon className="size-3.5" />
-            </button>
-          </AlertAction>
-        )}
-      </Alert>
+    <div className="px-3 pt-3 sm:px-5">
+      <div className="mx-auto w-full min-w-0 max-w-3xl">
+        <Alert variant="error">
+          <CircleAlertIcon />
+          <AlertDescription className="line-clamp-3" title={error}>
+            {error}
+          </AlertDescription>
+          {onDismiss && (
+            <AlertAction>
+              <button
+                type="button"
+                aria-label="Dismiss error"
+                className="inline-flex size-6 items-center justify-center rounded-md text-destructive/60 transition-colors hover:text-destructive"
+                onClick={onDismiss}
+              >
+                <XIcon className="size-3.5" />
+              </button>
+            </AlertAction>
+          )}
+        </Alert>
+      </div>
     </div>
   );
 });
@@ -4707,16 +4711,18 @@ const ProviderHealthBanner = memo(function ProviderHealthBanner({
       : `${status.provider} provider has limited availability.`;
 
   return (
-    <div className="pt-3 mx-auto max-w-3xl">
-      <Alert variant={status.status === "error" ? "error" : "warning"}>
-        <CircleAlertIcon />
-        <AlertTitle>
-          {status.provider === "codex" ? "Codex provider status" : `${status.provider} status`}
-        </AlertTitle>
-        <AlertDescription className="line-clamp-3" title={status.message ?? defaultMessage}>
-          {status.message ?? defaultMessage}
-        </AlertDescription>
-      </Alert>
+    <div className="px-3 pt-3 sm:px-5">
+      <div className="mx-auto w-full min-w-0 max-w-3xl">
+        <Alert variant={status.status === "error" ? "error" : "warning"}>
+          <CircleAlertIcon />
+          <AlertTitle>
+            {status.provider === "codex" ? "Codex provider status" : `${status.provider} status`}
+          </AlertTitle>
+          <AlertDescription className="line-clamp-3" title={status.message ?? defaultMessage}>
+            {status.message ?? defaultMessage}
+          </AlertDescription>
+        </Alert>
+      </div>
     </div>
   );
 });

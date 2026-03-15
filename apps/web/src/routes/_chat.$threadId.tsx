@@ -4,6 +4,7 @@ import { createFileRoute, retainSearchParams, useNavigate } from "@tanstack/reac
 import { Suspense, lazy, useState, useMemo, type ReactNode, useCallback, useEffect } from "react";
 
 import ChatView from "../components/ChatView";
+import { TerminalPane } from "../components/TerminalPane";
 import { DiffWorkerPoolProvider } from "../components/DiffWorkerPoolProvider";
 import {
   DiffPanelHeaderSkeleton,
@@ -31,9 +32,10 @@ import {
   computeClosestDropZone,
   dropZoneToSplit,
   type DropZone,
-  findLeaf,
-  findLeafByThreadId,
-  firstLeaf,
+  type SplitTerminalPane,
+  findPane,
+  findPaneByThreadId,
+  firstThreadPane,
 } from "../splitViewStore";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { MAX_TERMINALS_PER_GROUP } from "../types";
@@ -181,7 +183,11 @@ const DiffPanelInlineSidebar = (props: {
   );
 };
 
-/** Renders a single thread pane inside a split leaf. */
+function renderTerminalPane(pane: SplitTerminalPane) {
+  return <TerminalPane key={pane.terminalId} pane={pane} />;
+}
+
+/** Renders a single thread pane inside a split pane. */
 function SplitThreadPane({
   threadId,
   onCloseSplitPane,
@@ -338,16 +344,17 @@ function ChatThreadRouteView() {
   const shouldUseDiffSheet = useMediaQuery(DIFF_INLINE_LAYOUT_MEDIA_QUERY);
   const commandPaletteOpen = useCommandPaletteStore((state) => state.open);
   const commandPaletteMode = useCommandPaletteStore((state) => state.mode);
-  const commandPalettePreviewLeafId = useCommandPaletteStore((state) => state.previewLeafId);
+  const commandPalettePreviewPaneId = useCommandPaletteStore((state) => state.previewPaneId);
   const commandPalettePreviewThreadId = useCommandPaletteStore((state) => state.previewThreadId);
 
   // Split view state
   const splitGroup = useSplitViewStore((s) => s.group);
-  const setFocusedLeaf = useSplitViewStore((s) => s.setFocusedLeaf);
+  const setFocusedPane = useSplitViewStore((s) => s.setFocusedPane);
   const splitThread = useSplitViewStore((s) => s.splitThread);
-  const splitLeaf = useSplitViewStore((s) => s.splitLeaf);
-  const replaceThreadInLeaf = useSplitViewStore((s) => s.replaceThreadInLeaf);
+  const splitPane = useSplitViewStore((s) => s.splitPane);
+  const replaceThreadInPane = useSplitViewStore((s) => s.replaceThreadInPane);
   const reconcileThreads = useSplitViewStore((s) => s.reconcileThreads);
+  const draggingThreadId = useSplitViewStore((s) => s.draggingThreadId);
   const setProjectDraftThreadId = useComposerDraftStore((s) => s.setProjectDraftThreadId);
   const isSplitView = splitGroup !== null;
 
@@ -373,71 +380,62 @@ function ChatThreadRouteView() {
     [setProjectDraftThreadId],
   );
 
-  /** Handle a thread/project dropped onto a split pane's drop zone. */
-  const handleSplitDrop = useCallback(
+  /** Core drop logic for both split-mode and single-thread-mode drops. */
+  const executeDrop = useCallback(
     (
-      leafId: string,
       droppedThreadId: ThreadId | null,
       projectId: string | null,
       zone: DropZone,
+      paneId: string | null,
     ) => {
-      if (droppedThreadId) {
-        if (zone === "center") {
-          if (!isSplitView) {
-            void navigate({
-              to: "/$threadId",
-              params: { threadId: droppedThreadId },
-            });
-            return;
-          }
-          const existingLeaf = splitGroup
-            ? findLeafByThreadId(splitGroup.root, droppedThreadId)
+      const resolvedThreadId = droppedThreadId ?? (projectId ? createProjectDraftThread(projectId as ProjectId) : null);
+      if (!resolvedThreadId) return;
+
+      if (zone === "center") {
+        if (isSplitView && paneId) {
+          const existingPane = splitGroup
+            ? findPaneByThreadId(splitGroup.root, resolvedThreadId)
             : null;
-          if (existingLeaf) {
-            setFocusedLeaf(existingLeaf.id);
+          if (existingPane) {
+            setFocusedPane(existingPane.id);
           } else {
-            replaceThreadInLeaf(leafId, droppedThreadId);
+            replaceThreadInPane(paneId, resolvedThreadId);
           }
-          return;
-        }
-        const { direction, insertBefore } = dropZoneToSplit(zone);
-        if (isSplitView) {
-          splitLeaf(leafId, droppedThreadId, direction, insertBefore);
         } else {
-          splitThread(threadId, droppedThreadId, direction, insertBefore);
+          void navigate({
+            to: "/$threadId",
+            params: { threadId: resolvedThreadId },
+          });
         }
-      } else if (projectId) {
-        const tid = createProjectDraftThread(projectId as ProjectId);
-        if (zone === "center") {
-          if (isSplitView) {
-            replaceThreadInLeaf(leafId, tid);
-          } else {
-            void navigate({
-              to: "/$threadId",
-              params: { threadId: tid },
-            });
-          }
-          return;
-        }
-        const { direction, insertBefore } = dropZoneToSplit(zone);
-        if (isSplitView) {
-          splitLeaf(leafId, tid, direction, insertBefore);
-        } else {
-          splitThread(threadId, tid, direction, insertBefore);
-        }
+        return;
+      }
+
+      const { direction, insertBefore } = dropZoneToSplit(zone);
+      if (isSplitView && paneId) {
+        splitPane(paneId, resolvedThreadId, direction, insertBefore);
+      } else {
+        splitThread(threadId, resolvedThreadId, direction, insertBefore);
       }
     },
     [
       createProjectDraftThread,
       isSplitView,
       navigate,
-      replaceThreadInLeaf,
-      setFocusedLeaf,
+      replaceThreadInPane,
+      setFocusedPane,
       splitGroup,
-      splitLeaf,
+      splitPane,
       splitThread,
       threadId,
     ],
+  );
+
+  /** Handle a thread/project dropped onto a split pane's drop zone. */
+  const handleSplitDrop = useCallback(
+    (paneId: string, droppedThreadId: ThreadId | null, projectId: string | null, zone: DropZone) => {
+      executeDrop(droppedThreadId, projectId, zone, paneId);
+    },
+    [executeDrop],
   );
 
   /** Handle initial drop onto the single-thread view (not yet split). */
@@ -447,50 +445,35 @@ function ChatThreadRouteView() {
       const droppedThreadId = e.dataTransfer.getData("application/t3-thread-id") || null;
       const droppedProjectId = e.dataTransfer.getData("application/t3-project-id") || null;
       const dragType = e.dataTransfer.getData("application/t3-drag-type");
-
       const rect = e.currentTarget.getBoundingClientRect();
       const zone = computeClosestDropZone(e.clientX, e.clientY, rect);
       if (dragType === "project" && droppedProjectId) {
-        const tid = createProjectDraftThread(droppedProjectId as ProjectId);
-        if (zone === "center") {
-          void navigate({
-            to: "/$threadId",
-            params: { threadId: tid },
-          });
-          return;
-        }
-        const { direction, insertBefore } = dropZoneToSplit(zone);
-        splitThread(threadId, tid, direction, insertBefore);
+        executeDrop(null, droppedProjectId, zone, null);
       } else if (droppedThreadId && droppedThreadId !== threadId) {
-        if (zone === "center") {
-          void navigate({
-            to: "/$threadId",
-            params: { threadId: droppedThreadId as ThreadId },
-          });
-          return;
-        }
-        const { direction, insertBefore } = dropZoneToSplit(zone);
-        splitThread(threadId, droppedThreadId as ThreadId, direction, insertBefore);
+        executeDrop(droppedThreadId as ThreadId, null, zone, null);
       }
     },
-    [createProjectDraftThread, navigate, splitThread, threadId],
+    [executeDrop, threadId],
   );
 
+  const serverThreadIds = useMemo(() => threads.map((t) => t.id), [threads]);
+  const draftThreadIds = useMemo(
+    () => Object.keys(draftThreadsByThreadId) as ThreadId[],
+    [draftThreadsByThreadId],
+  );
   const availableThreadIds = useMemo(() => {
-    const next = new Set<ThreadId>();
-    for (const thread of threads) {
-      next.add(thread.id);
-    }
-    for (const draftThreadId of Object.keys(draftThreadsByThreadId) as ThreadId[]) {
-      next.add(draftThreadId);
+    const next = new Set<ThreadId>(serverThreadIds);
+    for (const id of draftThreadIds) {
+      next.add(id);
     }
     return next;
-  }, [draftThreadsByThreadId, threads]);
+  }, [serverThreadIds, draftThreadIds]);
 
   const routeFallbackThreadId = useMemo(() => {
     if (!splitGroup) return null;
-    const focusedLeaf = findLeaf(splitGroup.root, splitGroup.focusedLeafId);
-    return focusedLeaf?.threadId ?? firstLeaf(splitGroup.root).threadId;
+    const focusedPane = findPane(splitGroup.root, splitGroup.focusedPaneId);
+    if (focusedPane && "threadId" in focusedPane) return focusedPane.threadId;
+    return firstThreadPane(splitGroup.root)?.threadId ?? null;
   }, [splitGroup]);
   const focusedThreadId = routeFallbackThreadId ?? threadId;
 
@@ -586,11 +569,11 @@ function ChatThreadRouteView() {
 
   // ── Split view mode ──────────────────────────────────────────────
   if (isSplitView) {
-    const renderThread = (tid: ThreadId, leafId: string) => {
+    const renderThread = (tid: ThreadId, paneId: string) => {
       const isPaletteSplitPreview =
         commandPaletteOpen &&
         commandPaletteMode !== "default" &&
-        commandPalettePreviewLeafId === leafId &&
+        commandPalettePreviewPaneId === paneId &&
         commandPalettePreviewThreadId === tid;
 
       if (isPaletteSplitPreview) {
@@ -602,7 +585,7 @@ function ChatThreadRouteView() {
       }
 
       const onClose = () => {
-        const remaining = useSplitViewStore.getState().closePane(leafId);
+        const remaining = useSplitViewStore.getState().closePane(paneId);
         if (remaining) {
           void navigate({
             to: "/$threadId",
@@ -617,7 +600,7 @@ function ChatThreadRouteView() {
       <div className="flex h-dvh w-full min-h-0 min-w-0 flex-col overflow-hidden">
         <div className="flex min-h-0 flex-1 overflow-hidden">
           <SidebarInset className="min-h-0 flex-1 overflow-hidden overscroll-y-none bg-muted py-3 pl-2 pr-3 text-foreground dark:bg-card">
-            <SplitPanelRoot renderThread={renderThread} onSplitDrop={handleSplitDrop} />
+            <SplitPanelRoot renderThread={renderThread} renderTerminal={renderTerminalPane} onSplitDrop={handleSplitDrop} />
           </SidebarInset>
           {!shouldUseDiffSheet && (
             <DiffPanelInlineSidebar
@@ -648,6 +631,8 @@ function ChatThreadRouteView() {
           e.dataTransfer.types.includes("application/t3-thread-id") ||
           e.dataTransfer.types.includes("application/t3-project-id")
         ) {
+          // Don't show split preview when dragging the thread that's already displayed
+          if (draggingThreadId && draggingThreadId === threadId) return;
           e.preventDefault();
           const rect = e.currentTarget.getBoundingClientRect();
           setInitialDropZone(computeClosestDropZone(e.clientX, e.clientY, rect));
@@ -669,7 +654,11 @@ function ChatThreadRouteView() {
         handleInitialDrop(e);
       }}
     >
-      <div className="flex h-full min-h-0 w-full min-w-0 overflow-hidden rounded-lg bg-background">
+      <div className={`flex min-h-0 min-w-0 overflow-hidden bg-background ${
+        initialDropZone
+          ? "h-full w-full rounded-lg"
+          : "absolute inset-0"
+      }`}>
         <SplitDropPreview zone={initialDropZone}>
           <ChatView key={threadId} threadId={threadId} onCloseSplitPane={undefined} />
         </SplitDropPreview>
@@ -695,7 +684,7 @@ function ChatThreadRouteView() {
   }
 
   return (
-    <div className="flex h-dvh min-h-0 flex-col overflow-hidden">
+    <div className="flex h-dvh w-full min-h-0 min-w-0 flex-col overflow-hidden">
       <div className="flex min-h-0 flex-1 overflow-hidden">
         {singleThreadPane}
         <DiffPanelSheet diffOpen={diffOpen} onCloseDiff={closeDiff}>
