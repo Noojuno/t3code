@@ -97,8 +97,17 @@ export function CommandPaletteProvider({ children }: { children: ReactNode }) {
 }
 
 function CommandPaletteDialog() {
+  const { open } = useCommandPalette();
+  if (!open) {
+    return null;
+  }
+
+  return <OpenCommandPaletteDialog />;
+}
+
+function OpenCommandPaletteDialog() {
   const navigate = useNavigate();
-  const { open, setOpen } = useCommandPalette();
+  const { setOpen } = useCommandPalette();
   const { settings } = useAppSettings();
   const { activeDraftThread, activeThread, handleNewThread, projects } = useHandleNewThread();
   const threads = useStore((store) => store.threads);
@@ -252,10 +261,6 @@ function CommandPaletteDialog() {
     },
     [setOpen],
   );
-
-  if (!open) {
-    return null;
-  }
 
   return (
     <CommandDialogPopup
