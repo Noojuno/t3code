@@ -3,7 +3,8 @@ import { useQuery } from "@tanstack/react-query";
 import { Outlet, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect } from "react";
 
-import { CommandPaletteProvider, useCommandPalette } from "../components/CommandPalette";
+import { CommandPalette } from "../components/CommandPalette";
+import { useCommandPaletteStore } from "../commandPaletteStore";
 import ThreadSidebar from "../components/Sidebar";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import {
@@ -25,7 +26,8 @@ function ChatRouteGlobalShortcuts() {
   const selectedThreadIdsSize = useThreadSelectionStore((state) => state.selectedThreadIds.size);
   const { activeDraftThread, activeThread, handleNewThread, projects, routeThreadId } =
     useHandleNewThread();
-  const { open: commandPaletteOpen, toggleOpen } = useCommandPalette();
+  const commandPaletteOpen = useCommandPaletteStore((s) => s.open);
+  const toggleOpen = useCommandPaletteStore((s) => s.toggleOpen);
   const serverConfigQuery = useQuery(serverConfigQueryOptions());
   const keybindings = serverConfigQuery.data?.keybindings ?? EMPTY_KEYBINDINGS;
   const terminalOpen = useTerminalStateStore((state) =>
@@ -129,7 +131,7 @@ function ChatRouteLayout() {
   }, [navigate]);
 
   return (
-    <CommandPaletteProvider>
+    <CommandPalette>
       <SidebarProvider defaultOpen>
         <ChatRouteGlobalShortcuts />
         <Sidebar
@@ -141,7 +143,7 @@ function ChatRouteLayout() {
         </Sidebar>
         <Outlet />
       </SidebarProvider>
-    </CommandPaletteProvider>
+    </CommandPalette>
   );
 }
 

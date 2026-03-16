@@ -878,8 +878,9 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
           .pipe(Effect.catch(() => Effect.succeed([] as string[])));
 
         const showHidden = prefix.startsWith(".");
+        const lowerPrefix = prefix.toLowerCase();
         const filtered = names
-          .filter((n) => n.startsWith(prefix) && (showHidden || !n.startsWith(".")))
+          .filter((n) => n.toLowerCase().startsWith(lowerPrefix) && (showHidden || !n.startsWith(".")))
           .slice(0, 100);
 
         const entries = yield* Effect.forEach(
