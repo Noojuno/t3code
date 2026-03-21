@@ -235,9 +235,10 @@ const terminalContextIdListsEqual = (
 
 interface ChatViewProps {
   threadId: ThreadId;
+  onCloseSplitPane?: (() => void) | undefined;
 }
 
-export default function ChatView({ threadId }: ChatViewProps) {
+export default function ChatView({ threadId, onCloseSplitPane }: ChatViewProps) {
   const threads = useStore((store) => store.threads);
   const projects = useStore((store) => store.projects);
   const markThreadVisited = useStore((store) => store.markThreadVisited);
@@ -2213,6 +2214,36 @@ export default function ChatView({ threadId }: ChatViewProps) {
         return;
       }
 
+      if (command === "chat.splitRight") {
+        event.preventDefault();
+        event.stopPropagation();
+        useCommandPaletteStore.getState().openPalette({
+          mode: "split-right",
+          sourceThreadId: activeThreadId,
+        });
+        return;
+      }
+
+      if (command === "chat.splitDown") {
+        event.preventDefault();
+        event.stopPropagation();
+        useCommandPaletteStore.getState().openPalette({
+          mode: "split-down",
+          sourceThreadId: activeThreadId,
+        });
+        return;
+      }
+
+      if (command === "chat.replaceFocusedPane") {
+        event.preventDefault();
+        event.stopPropagation();
+        useCommandPaletteStore.getState().openPalette({
+          mode: "replace-focused",
+          sourceThreadId: activeThreadId,
+        });
+        return;
+      }
+
       const scriptId = projectScriptIdFromCommand(command);
       if (!scriptId || !activeProject) return;
       const script = activeProject.scripts.find((entry) => entry.id === scriptId);
@@ -4158,35 +4189,6 @@ export default function ChatView({ threadId }: ChatViewProps) {
         ) : null}
       </div>
       {/* end horizontal flex container */}
-
-      {(() => {
-        if (!terminalState.terminalOpen || !activeProject) {
-          return null;
-        }
-        return (
-          <ThreadTerminalDrawer
-            key={activeThread.id}
-            threadId={activeThread.id}
-            cwd={gitCwd ?? activeProject.cwd}
-            runtimeEnv={threadTerminalRuntimeEnv}
-            height={terminalState.terminalHeight}
-            terminalIds={terminalState.terminalIds}
-            activeTerminalId={terminalState.activeTerminalId}
-            terminalGroups={terminalState.terminalGroups}
-            activeTerminalGroupId={terminalState.activeTerminalGroupId}
-            focusRequestId={terminalFocusRequestId}
-            onSplitTerminal={splitTerminal}
-            onNewTerminal={createNewTerminal}
-            splitShortcutLabel={splitTerminalShortcutLabel ?? undefined}
-            newShortcutLabel={newTerminalShortcutLabel ?? undefined}
-            closeShortcutLabel={closeTerminalShortcutLabel ?? undefined}
-            onActiveTerminalChange={activateTerminal}
-            onCloseTerminal={closeTerminal}
-            onHeightChange={setTerminalHeight}
-            onAddTerminalContext={addTerminalContextToDraft}
-          />
-        );
-      })()}
 
       {expandedImage && expandedImageItem && (
         <div

@@ -180,7 +180,7 @@ export function shouldHandleTerminalSelectionMouseUp(
   return selectionGestureActive && button === 0;
 }
 
-interface TerminalViewportProps {
+export interface TerminalViewportProps {
   threadId: ThreadId;
   terminalId: string;
   terminalLabel: string;
@@ -194,7 +194,7 @@ interface TerminalViewportProps {
   drawerHeight: number;
 }
 
-function TerminalViewport({
+export function TerminalViewport({
   threadId,
   terminalId,
   terminalLabel,

@@ -1,0 +1,45 @@
+{
+  "scripts": [
+    {
+      "name": "Install",
+      "command": "bun install",
+      "icon": "configure",
+      "runOnWorktreeCreate": true
+    },
+    {
+      "name": "Build",
+      "command": "bun run build",
+      "icon": "build"
+    },
+    {
+      "name": "Typecheck",
+      "command": "bun run typecheck",
+      "icon": "build"
+    },
+    {
+      "name": "Test",
+      "command": "bun run test",
+      "icon": "test"
+    },
+    {
+      "name": "Lint",
+      "command": "bun run lint",
+      "icon": "lint"
+    },
+    {
+      "name": "Format Check",
+      "command": "bun run fmt:check",
+      "icon": "lint"
+    },
+    {
+      "name": "Dev",
+      "command": "bun run dev",
+      "icon": "play"
+    },
+    {
+      "name": "Dev Desktop",
+      "command": "bun run dev:desktop",
+      "icon": "play"
+    }
+  ]
+}

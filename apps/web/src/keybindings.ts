@@ -230,6 +230,30 @@ export function isChatNewLocalShortcut(
   return matchesCommandShortcut(event, keybindings, "chat.newLocal", options);
 }
 
+export function isChatSplitRightShortcut(
+  event: ShortcutEventLike,
+  keybindings: ResolvedKeybindingsConfig,
+  options?: ShortcutMatchOptions,
+): boolean {
+  return matchesCommandShortcut(event, keybindings, "chat.splitRight", options);
+}
+
+export function isChatSplitDownShortcut(
+  event: ShortcutEventLike,
+  keybindings: ResolvedKeybindingsConfig,
+  options?: ShortcutMatchOptions,
+): boolean {
+  return matchesCommandShortcut(event, keybindings, "chat.splitDown", options);
+}
+
+export function isChatReplaceFocusedPaneShortcut(
+  event: ShortcutEventLike,
+  keybindings: ResolvedKeybindingsConfig,
+  options?: ShortcutMatchOptions,
+): boolean {
+  return matchesCommandShortcut(event, keybindings, "chat.replaceFocusedPane", options);
+}
+
 export function isOpenFavoriteEditorShortcut(
   event: ShortcutEventLike,
   keybindings: ResolvedKeybindingsConfig,
