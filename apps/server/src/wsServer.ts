@@ -77,6 +77,7 @@ import { AnalyticsService } from "./telemetry/Services/AnalyticsService.ts";
 import { expandHomePath } from "./os-jank.ts";
 import { makeServerPushBus } from "./wsServer/pushBus.ts";
 import { makeServerReadiness } from "./wsServer/readiness.ts";
+import { isExplicitRelativePath, isWindowsAbsolutePath } from "@t3tools/shared/path";
 import { decodeJsonResult, formatSchemaError } from "@t3tools/shared/schemaJson";
 
 /**
@@ -109,6 +110,23 @@ const isServerNotRunningError = (error: Error): boolean => {
     maybeCode === "ERR_SERVER_NOT_RUNNING" || error.message.toLowerCase().includes("not running")
   );
 };
+
+function resolveFilesystemBrowseInputPath(input: {
+  cwd: string | undefined;
+  path: Path.Path;
+  partialPath: string;
+}): Effect.Effect<string | null, never, Path.Path> {
+  return Effect.gen(function* () {
+    if (!isExplicitRelativePath(input.partialPath)) {
+      return input.path.resolve(yield* expandHomePath(input.partialPath));
+    }
+    if (!input.cwd) {
+      return null;
+    }
+    const expandedCwd = yield* expandHomePath(input.cwd);
+    return input.path.resolve(expandedCwd, input.partialPath);
+  });
+}
 
 function rejectUpgrade(socket: Duplex, statusCode: number, message: string): void {
   socket.end(
@@ -876,6 +894,66 @@ export const createServer = Effect.fn(function* (): Effect.fn.Return<
       case WS_METHODS.terminalClose: {
         const body = stripRequestTag(request.body);
         return yield* terminalManager.close(body);
+      }
+
+      case WS_METHODS.filesystemBrowse: {
+        const body = stripRequestTag(request.body);
+        if (process.platform !== "win32" && isWindowsAbsolutePath(body.partialPath)) {
+          return yield* new RouteRequestError({
+            message: "Windows-style paths are only supported on Windows.",
+          });
+        }
+        const resolvedInputPath = yield* resolveFilesystemBrowseInputPath({
+          cwd: body.cwd,
+          path,
+          partialPath: body.partialPath,
+        });
+        if (resolvedInputPath === null) {
+          return yield* new RouteRequestError({
+            message: "Relative filesystem browse paths require a current project.",
+          });
+        }
+
+        const expanded = resolvedInputPath;
+        const endsWithSep = /[\\/]$/.test(body.partialPath) || body.partialPath === "~";
+        const parentDir = endsWithSep ? expanded : path.dirname(expanded);
+        const prefix = endsWithSep ? "" : path.basename(expanded);
+
+        const names = yield* fileSystem.readDirectory(parentDir).pipe(
+          Effect.mapError(
+            (cause) =>
+              new RouteRequestError({
+                message: `Unable to browse '${parentDir}': ${Cause.pretty(Cause.fail(cause)).trim()}`,
+              }),
+          ),
+        );
+
+        const showHidden = endsWithSep || prefix.startsWith(".");
+        const lowerPrefix = prefix.toLowerCase();
+        const filtered = names
+          .filter(
+            (name) =>
+              name.toLowerCase().startsWith(lowerPrefix) && (showHidden || !name.startsWith(".")),
+          )
+          .toSorted((left, right) => left.localeCompare(right));
+
+        const entries = yield* Effect.forEach(
+          filtered,
+          (name) =>
+            fileSystem.stat(path.join(parentDir, name)).pipe(
+              Effect.match({
+                onFailure: () => null,
+                onSuccess: (s) =>
+                  s.type === "Directory" ? { name, fullPath: path.join(parentDir, name) } : null,
+              }),
+            ),
+          { concurrency: 16 },
+        );
+
+        return {
+          parentPath: parentDir,
+          entries: entries.filter(Boolean),
+        };
       }
 
       case WS_METHODS.serverGetConfig:

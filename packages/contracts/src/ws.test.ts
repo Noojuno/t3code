@@ -73,6 +73,25 @@ it.effect("accepts git.preparePullRequestThread requests", () =>
   }),
 );
 
+it.effect("accepts filesystem browse requests and trims the partial path", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeWebSocketRequest({
+      id: "req-filesystem-1",
+      body: {
+        _tag: WS_METHODS.filesystemBrowse,
+        partialPath: " ~/projects ",
+        cwd: " /repo/app ",
+      },
+    });
+
+    assert.strictEqual(parsed.body._tag, WS_METHODS.filesystemBrowse);
+    if (parsed.body._tag === WS_METHODS.filesystemBrowse) {
+      assert.strictEqual(parsed.body.partialPath, "~/projects");
+      assert.strictEqual(parsed.body.cwd, "/repo/app");
+    }
+  }),
+);
+
 it.effect("accepts typed websocket push envelopes with sequence", () =>
   Effect.gen(function* () {
     const parsed = yield* decodeWsResponse({
