@@ -1617,6 +1617,213 @@ describe("WebSocket Server", () => {
     });
   });
 
+  it("supports filesystem.browse with directory-only results", async () => {
+    const workspace = makeTempDir("t3code-ws-filesystem-browse-");
+    fs.mkdirSync(path.join(workspace, "components"), { recursive: true });
+    fs.mkdirSync(path.join(workspace, "composables"), { recursive: true });
+    fs.writeFileSync(path.join(workspace, "composer.ts"), "export {};\n", "utf8");
+
+    server = await createTestServer({ cwd: "/test" });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const [ws] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+
+    const response = await sendRequest(ws, WS_METHODS.filesystemBrowse, {
+      partialPath: path.join(workspace, "comp"),
+    });
+
+    expect(response.error).toBeUndefined();
+    expect(response.result).toEqual({
+      parentPath: workspace,
+      entries: [
+        {
+          name: "components",
+          fullPath: path.join(workspace, "components"),
+        },
+        {
+          name: "composables",
+          fullPath: path.join(workspace, "composables"),
+        },
+      ],
+    });
+  });
+
+  it("includes hidden directories when browsing a full directory", async () => {
+    const workspace = makeTempDir("t3code-ws-filesystem-browse-hidden-");
+    fs.mkdirSync(path.join(workspace, ".config"), { recursive: true });
+    fs.mkdirSync(path.join(workspace, "docs"), { recursive: true });
+
+    server = await createTestServer({ cwd: "/test" });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const [ws] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+
+    const response = await sendRequest(ws, WS_METHODS.filesystemBrowse, {
+      partialPath: `${workspace}/`,
+    });
+
+    expect(response.error).toBeUndefined();
+    expect(response.result).toEqual({
+      parentPath: workspace,
+      entries: [
+        {
+          name: ".config",
+          fullPath: path.join(workspace, ".config"),
+        },
+        {
+          name: "docs",
+          fullPath: path.join(workspace, "docs"),
+        },
+      ],
+    });
+  });
+
+  it("skips unreadable or broken browse entries instead of failing the request", async () => {
+    if (process.platform === "win32") {
+      return;
+    }
+
+    const workspace = makeTempDir("t3code-ws-filesystem-browse-broken-entry-");
+    fs.mkdirSync(path.join(workspace, "docs"), { recursive: true });
+    fs.symlinkSync(path.join(workspace, "missing-target"), path.join(workspace, "broken-link"));
+
+    server = await createTestServer({ cwd: "/test" });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const [ws] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+
+    const response = await sendRequest(ws, WS_METHODS.filesystemBrowse, {
+      partialPath: `${workspace}/`,
+    });
+
+    expect(response.error).toBeUndefined();
+    expect(response.result).toEqual({
+      parentPath: workspace,
+      entries: [
+        {
+          name: "docs",
+          fullPath: path.join(workspace, "docs"),
+        },
+      ],
+    });
+  });
+
+  it("resolves relative filesystem.browse paths against the provided cwd", async () => {
+    const workspace = makeTempDir("t3code-ws-filesystem-browse-relative-");
+    fs.mkdirSync(path.join(workspace, "apps"), { recursive: true });
+    fs.mkdirSync(path.join(workspace, "docs"), { recursive: true });
+
+    server = await createTestServer({ cwd: "/test" });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const [ws] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+
+    const response = await sendRequest(ws, WS_METHODS.filesystemBrowse, {
+      partialPath: "../d",
+      cwd: path.join(workspace, "apps"),
+    });
+
+    expect(response.error).toBeUndefined();
+    expect(response.result).toEqual({
+      parentPath: workspace,
+      entries: [
+        {
+          name: "docs",
+          fullPath: path.join(workspace, "docs"),
+        },
+      ],
+    });
+  });
+
+  it("resolves bare dot and dot-dot filesystem.browse paths against the provided cwd", async () => {
+    const root = makeTempDir("t3code-ws-filesystem-browse-dot-relative-");
+    const workspace = path.join(root, "workspace");
+    fs.mkdirSync(path.join(workspace, "apps"), { recursive: true });
+
+    server = await createTestServer({ cwd: "/test" });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const [ws] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+
+    const currentDirResponse = await sendRequest(ws, WS_METHODS.filesystemBrowse, {
+      partialPath: ".",
+      cwd: workspace,
+    });
+    expect(currentDirResponse.error).toBeUndefined();
+    expect(currentDirResponse.result).toEqual({
+      parentPath: root,
+      entries: [
+        {
+          name: "workspace",
+          fullPath: workspace,
+        },
+      ],
+    });
+
+    const parentDirResponse = await sendRequest(ws, WS_METHODS.filesystemBrowse, {
+      partialPath: "..",
+      cwd: path.join(workspace, "apps"),
+    });
+    expect(parentDirResponse.error).toBeUndefined();
+    expect(parentDirResponse.result).toEqual({
+      parentPath: root,
+      entries: [
+        {
+          name: "workspace",
+          fullPath: workspace,
+        },
+      ],
+    });
+  });
+
+  it("rejects relative filesystem.browse paths without a cwd", async () => {
+    server = await createTestServer({ cwd: "/test" });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const [ws] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+
+    const response = await sendRequest(ws, WS_METHODS.filesystemBrowse, {
+      partialPath: "./docs",
+    });
+
+    expect(response.result).toBeUndefined();
+    expect(response.error?.message).toContain(
+      "Relative filesystem browse paths require a current project.",
+    );
+  });
+
+  it("rejects windows-style filesystem.browse paths on non-windows hosts", async () => {
+    if (process.platform === "win32") {
+      return;
+    }
+
+    server = await createTestServer({ cwd: "/test" });
+    const addr = server.address();
+    const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+
+    const [ws] = await connectAndAwaitWelcome(port);
+    connections.push(ws);
+
+    const response = await sendRequest(ws, WS_METHODS.filesystemBrowse, {
+      partialPath: "C:\\Work\\Repo",
+    });
+
+    expect(response.result).toBeUndefined();
+    expect(response.error?.message).toContain("Windows-style paths are only supported on Windows.");
+  });
+
   it("supports projects.writeFile within the workspace root", async () => {
     const workspace = makeTempDir("t3code-ws-write-file-");
 
