@@ -61,14 +61,6 @@ export class DesktopLocalEnvironmentAuthTokenStore extends Context.Service<
   }
 >()("@t3tools/desktop/backend/DesktopLocalEnvironmentAuthTokenStore") {}
 
-function storeError(
-  operation: typeof TokenStoreOperation.Type,
-  path: string,
-  cause: unknown,
-): DesktopLocalEnvironmentAuthTokenStoreError {
-  return new DesktopLocalEnvironmentAuthTokenStoreError({ operation, path, cause });
-}
-
 export const make = Effect.gen(function* () {
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
   const fileSystem = yield* FileSystem.FileSystem;
@@ -81,20 +73,40 @@ export const make = Effect.gen(function* () {
     Effect.catch((error) =>
       error.reason._tag === "NotFound"
         ? Effect.succeed<string | null>(null)
-        : Effect.fail(storeError("read", tokenPath, error)),
+        : Effect.fail(
+            new DesktopLocalEnvironmentAuthTokenStoreError({
+              operation: "read",
+              path: tokenPath,
+              cause: error,
+            }),
+          ),
     ),
     Effect.flatMap((raw) =>
       raw === null
         ? Effect.succeed(Option.none<TokenDocument>())
         : decodeTokenDocumentJson(raw).pipe(
             Effect.map(Option.some),
-            Effect.mapError((cause) => storeError("decode-document", tokenPath, cause)),
+            Effect.mapError(
+              (cause) =>
+                new DesktopLocalEnvironmentAuthTokenStoreError({
+                  operation: "decode-document",
+                  path: tokenPath,
+                  cause,
+                }),
+            ),
           ),
     ),
   );
 
   const encryptionAvailable = safeStorage.isEncryptionAvailable.pipe(
-    Effect.mapError((cause) => storeError("check-encryption-availability", tokenPath, cause)),
+    Effect.mapError(
+      (cause) =>
+        new DesktopLocalEnvironmentAuthTokenStoreError({
+          operation: "check-encryption-availability",
+          path: tokenPath,
+          cause,
+        }),
+    ),
   );
   const secureStorageAvailable = Effect.gen(function* () {
     if (!(yield* encryptionAvailable)) {
@@ -106,24 +118,57 @@ export const make = Effect.gen(function* () {
   const writeDocument = Effect.fn("desktop.localEnvironmentAuthTokenStore.writeDocument")(
     function* (document: TokenDocument) {
       const suffix = (yield* crypto.randomUUIDv4.pipe(
-        Effect.mapError((cause) => storeError("create-temporary-file-name", tokenPath, cause)),
+        Effect.mapError(
+          (cause) =>
+            new DesktopLocalEnvironmentAuthTokenStoreError({
+              operation: "create-temporary-file-name",
+              path: tokenPath,
+              cause,
+            }),
+        ),
       )).replaceAll("-", "");
       const temporaryPath = `${tokenPath}.${process.pid}.${suffix}.tmp`;
       const encoded = yield* encodeTokenDocumentJson(document).pipe(
-        Effect.mapError((cause) => storeError("encode-document", tokenPath, cause)),
+        Effect.mapError(
+          (cause) =>
+            new DesktopLocalEnvironmentAuthTokenStoreError({
+              operation: "encode-document",
+              path: tokenPath,
+              cause,
+            }),
+        ),
       );
-      yield* fileSystem
-        .makeDirectory(path.dirname(tokenPath), { recursive: true })
-        .pipe(Effect.mapError((cause) => storeError("create-directory", tokenPath, cause)));
+      yield* fileSystem.makeDirectory(path.dirname(tokenPath), { recursive: true }).pipe(
+        Effect.mapError(
+          (cause) =>
+            new DesktopLocalEnvironmentAuthTokenStoreError({
+              operation: "create-directory",
+              path: tokenPath,
+              cause,
+            }),
+        ),
+      );
       yield* Effect.gen(function* () {
-        yield* fileSystem
-          .writeFileString(temporaryPath, `${encoded}\n`)
-          .pipe(
-            Effect.mapError((cause) => storeError("write-temporary-file", temporaryPath, cause)),
-          );
-        yield* fileSystem
-          .rename(temporaryPath, tokenPath)
-          .pipe(Effect.mapError((cause) => storeError("replace-file", tokenPath, cause)));
+        yield* fileSystem.writeFileString(temporaryPath, `${encoded}\n`).pipe(
+          Effect.mapError(
+            (cause) =>
+              new DesktopLocalEnvironmentAuthTokenStoreError({
+                operation: "write-temporary-file",
+                path: temporaryPath,
+                cause,
+              }),
+          ),
+        );
+        yield* fileSystem.rename(temporaryPath, tokenPath).pipe(
+          Effect.mapError(
+            (cause) =>
+              new DesktopLocalEnvironmentAuthTokenStoreError({
+                operation: "replace-file",
+                path: tokenPath,
+                cause,
+              }),
+          ),
+        );
       }).pipe(
         Effect.ensuring(
           fileSystem.remove(temporaryPath, { force: true }).pipe(
@@ -147,11 +192,27 @@ export const make = Effect.gen(function* () {
       }
       const encryptedToken = yield* Effect.fromResult(
         Encoding.decodeBase64(document.value.encryptedToken),
-      ).pipe(Effect.mapError((cause) => storeError("decode-token", tokenPath, cause)));
+      ).pipe(
+        Effect.mapError(
+          (cause) =>
+            new DesktopLocalEnvironmentAuthTokenStoreError({
+              operation: "decode-token",
+              path: tokenPath,
+              cause,
+            }),
+        ),
+      );
       return Option.some(
-        yield* safeStorage
-          .decryptString(encryptedToken)
-          .pipe(Effect.mapError((cause) => storeError("decrypt-token", tokenPath, cause))),
+        yield* safeStorage.decryptString(encryptedToken).pipe(
+          Effect.mapError(
+            (cause) =>
+              new DesktopLocalEnvironmentAuthTokenStoreError({
+                operation: "decrypt-token",
+                path: tokenPath,
+                cause,
+              }),
+          ),
+        ),
       );
     }).pipe(Effect.withSpan("desktop.localEnvironmentAuthTokenStore.get")),
     set: Effect.fn("desktop.localEnvironmentAuthTokenStore.set")(function* (token) {
@@ -159,15 +220,29 @@ export const make = Effect.gen(function* () {
         return false;
       }
       const encryptedToken = Encoding.encodeBase64(
-        yield* safeStorage
-          .encryptString(token)
-          .pipe(Effect.mapError((cause) => storeError("encrypt-token", tokenPath, cause))),
+        yield* safeStorage.encryptString(token).pipe(
+          Effect.mapError(
+            (cause) =>
+              new DesktopLocalEnvironmentAuthTokenStoreError({
+                operation: "encrypt-token",
+                path: tokenPath,
+                cause,
+              }),
+          ),
+        ),
       );
       yield* writeDocument({ version: 1, encryptedToken });
       return true;
     }),
     clear: fileSystem.remove(tokenPath, { force: true }).pipe(
-      Effect.mapError((cause) => storeError("clear", tokenPath, cause)),
+      Effect.mapError(
+        (cause) =>
+          new DesktopLocalEnvironmentAuthTokenStoreError({
+            operation: "clear",
+            path: tokenPath,
+            cause,
+          }),
+      ),
       Effect.withSpan("desktop.localEnvironmentAuthTokenStore.clear"),
     ),
   });
