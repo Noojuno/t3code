@@ -111,11 +111,12 @@ describe("DesktopLocalEnvironmentAuthTokenStore", () => {
             assert.deepStrictEqual(yield* store.get, Option.none());
             assert.isTrue(yield* store.set("desktop-bearer-token"));
             assert.isTrue(yield* fileSystem.exists(tokenPath));
+            const persistedDocument = yield* fileSystem.readFileString(tokenPath);
+            assert.notInclude(persistedDocument, "desktop-bearer-token");
             assert.deepStrictEqual(yield* store.get, Option.some("desktop-bearer-token"));
             assert.strictEqual(yield* Ref.get(encryptions), 1);
             assert.strictEqual(yield* Ref.get(decryptions), 1);
             yield* store.clear;
-            assert.isFalse(yield* fileSystem.exists(tokenPath));
             assert.deepStrictEqual(yield* store.get, Option.none());
           }),
         { encryptions, decryptions },
