@@ -96,6 +96,12 @@ export const make = Effect.gen(function* () {
   const encryptionAvailable = safeStorage.isEncryptionAvailable.pipe(
     Effect.mapError((cause) => storeError("check-encryption-availability", tokenPath, cause)),
   );
+  const secureStorageAvailable = Effect.gen(function* () {
+    if (!(yield* encryptionAvailable)) {
+      return false;
+    }
+    return !Option.contains(yield* safeStorage.selectedStorageBackend, "basic_text");
+  });
 
   const writeDocument = Effect.fn("desktop.localEnvironmentAuthTokenStore.writeDocument")(
     function* (document: TokenDocument) {
@@ -136,7 +142,7 @@ export const make = Effect.gen(function* () {
   return DesktopLocalEnvironmentAuthTokenStore.of({
     get: Effect.gen(function* () {
       const document = yield* readDocument;
-      if (Option.isNone(document) || !(yield* encryptionAvailable)) {
+      if (Option.isNone(document) || !(yield* secureStorageAvailable)) {
         return Option.none<string>();
       }
       const encryptedToken = yield* Effect.fromResult(
@@ -149,7 +155,7 @@ export const make = Effect.gen(function* () {
       );
     }).pipe(Effect.withSpan("desktop.localEnvironmentAuthTokenStore.get")),
     set: Effect.fn("desktop.localEnvironmentAuthTokenStore.set")(function* (token) {
-      if (!(yield* encryptionAvailable)) {
+      if (!(yield* secureStorageAvailable)) {
         return false;
       }
       const encryptedToken = Encoding.encodeBase64(

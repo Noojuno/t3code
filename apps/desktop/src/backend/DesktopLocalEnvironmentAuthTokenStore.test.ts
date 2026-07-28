@@ -13,11 +13,16 @@ import * as DesktopLocalEnvironmentAuthTokenStore from "./DesktopLocalEnvironmen
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
 
-function makeLayer(baseDir: string, encryptionAvailable = true) {
+function makeLayer(
+  baseDir: string,
+  encryptionAvailable = true,
+  platform: NodeJS.Platform = "darwin",
+  storageBackend = "unknown",
+) {
   const environmentLayer = DesktopEnvironment.layer({
     dirname: "/repo/apps/desktop/src",
     homeDirectory: baseDir,
-    platform: "darwin",
+    platform,
     processArch: "arm64",
     appVersion: "1.2.3",
     appPath: "/repo",
@@ -33,6 +38,9 @@ function makeLayer(baseDir: string, encryptionAvailable = true) {
     isEncryptionAvailable: Effect.succeed(encryptionAvailable),
     encryptString: (value) => Effect.succeed(textEncoder.encode(`encrypted:${value}`)),
     decryptString: (value) => Effect.succeed(textDecoder.decode(value).replace(/^encrypted:/, "")),
+    selectedStorageBackend: Effect.succeed(
+      platform === "linux" ? Option.some(storageBackend) : Option.none(),
+    ),
   } satisfies ElectronSafeStorage.ElectronSafeStorage["Service"]);
 
   return DesktopLocalEnvironmentAuthTokenStore.layer.pipe(
@@ -49,13 +57,17 @@ const withStore = <A, E, R>(
     R | DesktopLocalEnvironmentAuthTokenStore.DesktopLocalEnvironmentAuthTokenStore
   >,
   encryptionAvailable = true,
+  platform: NodeJS.Platform = "darwin",
+  storageBackend = "unknown",
 ) =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
     const baseDir = yield* fileSystem.makeTempDirectoryScoped({
       prefix: "t3-desktop-local-auth-test-",
     });
-    return yield* effect.pipe(Effect.provide(makeLayer(baseDir, encryptionAvailable)));
+    return yield* effect.pipe(
+      Effect.provide(makeLayer(baseDir, encryptionAvailable, platform, storageBackend)),
+    );
   }).pipe(Effect.provide(NodeServices.layer), Effect.scoped);
 
 describe("DesktopLocalEnvironmentAuthTokenStore", () => {
@@ -84,6 +96,21 @@ describe("DesktopLocalEnvironmentAuthTokenStore", () => {
         assert.deepStrictEqual(yield* store.get, Option.none());
       }),
       false,
+    ),
+  );
+
+  it.effect("does not persist a token with Linux's basic_text storage backend", () =>
+    withStore(
+      Effect.gen(function* () {
+        const store =
+          yield* DesktopLocalEnvironmentAuthTokenStore.DesktopLocalEnvironmentAuthTokenStore;
+
+        assert.isFalse(yield* store.set("desktop-bearer-token"));
+        assert.deepStrictEqual(yield* store.get, Option.none());
+      }),
+      true,
+      "linux",
+      "basic_text",
     ),
   );
 });
