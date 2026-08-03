@@ -40,6 +40,7 @@ function makePersistedSessionTestLayer(input: {
   readonly requests: Ref.Ref<ReadonlyArray<string>>;
   readonly persistedToken: Ref.Ref<Option.Option<string>>;
   readonly tokenStoreOperations: Ref.Ref<ReadonlyArray<string>>;
+  readonly tokenStoreReadError?: DesktopLocalEnvironmentAuthTokenStore.DesktopLocalEnvironmentAuthTokenStoreError;
   readonly sessionValidationResult: SessionValidationResult;
 }) {
   const httpClientLayer = Layer.succeed(
@@ -89,7 +90,11 @@ function makePersistedSessionTestLayer(input: {
     DesktopLocalEnvironmentAuthTokenStore.DesktopLocalEnvironmentAuthTokenStore,
     {
       get: Ref.update(input.tokenStoreOperations, (operations) => [...operations, "get"]).pipe(
-        Effect.andThen(Ref.get(input.persistedToken)),
+        Effect.andThen(
+          input.tokenStoreReadError === undefined
+            ? Ref.get(input.persistedToken)
+            : Effect.fail(input.tokenStoreReadError),
+        ),
       ),
       set: (token) =>
         Effect.gen(function* () {
@@ -243,6 +248,34 @@ describe("DesktopLocalEnvironmentAuth", () => {
         DesktopLocalEnvironmentAuth.DesktopLocalEnvironmentAuthSessionValidationError,
       );
       assert.deepStrictEqual(yield* Ref.get(requests), ["http://127.0.0.1:3773/api/auth/session"]);
+      assert.deepStrictEqual(yield* Ref.get(tokenStoreOperations), ["get"]);
+      assert.deepStrictEqual(yield* Ref.get(persistedToken), Option.some("desktop-bearer-token"));
+    }),
+  );
+
+  it.effect("does not create a session when reading the persisted token fails", () =>
+    Effect.gen(function* () {
+      const requests = yield* Ref.make<ReadonlyArray<string>>([]);
+      const persistedToken = yield* Ref.make(Option.some("desktop-bearer-token"));
+      const tokenStoreOperations = yield* Ref.make<ReadonlyArray<string>>([]);
+      const tokenStoreReadError =
+        new DesktopLocalEnvironmentAuthTokenStore.DesktopLocalEnvironmentAuthTokenStoreError({
+          operation: "read",
+          path: "/tmp/t3/desktop-local-auth.json",
+          cause: new Error("temporary read failure"),
+        });
+      const testLayer = makePersistedSessionTestLayer({
+        requests,
+        persistedToken,
+        tokenStoreOperations,
+        tokenStoreReadError,
+        sessionValidationResult: "authenticated",
+      });
+
+      const error = yield* readToken.pipe(Effect.provide(testLayer), Effect.flip);
+
+      assert.strictEqual(error, tokenStoreReadError);
+      assert.deepStrictEqual(yield* Ref.get(requests), []);
       assert.deepStrictEqual(yield* Ref.get(tokenStoreOperations), ["get"]);
       assert.deepStrictEqual(yield* Ref.get(persistedToken), Option.some("desktop-bearer-token"));
     }),

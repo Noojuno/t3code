@@ -46,6 +46,7 @@ export const DesktopLocalEnvironmentAuthError = Schema.Union([
   DesktopLocalEnvironmentAuthBackendNotConfiguredError,
   DesktopLocalEnvironmentAuthSessionBootstrapError,
   DesktopLocalEnvironmentAuthSessionValidationError,
+  DesktopLocalEnvironmentAuthTokenStore.DesktopLocalEnvironmentAuthTokenStoreError,
 ]);
 export type DesktopLocalEnvironmentAuthError = typeof DesktopLocalEnvironmentAuthError.Type;
 
@@ -79,13 +80,7 @@ export const make = Effect.gen(function* () {
           return yield* new DesktopLocalEnvironmentAuthBackendNotConfiguredError();
         }
         const config = configOption.value;
-        const persistedToken = yield* tokenStore.get.pipe(
-          Effect.catch((error) =>
-            Effect.logWarning("Could not read the saved desktop authorization token.", {
-              error,
-            }).pipe(Effect.as(Option.none<string>())),
-          ),
-        );
+        const persistedToken = yield* tokenStore.get;
         if (Option.isSome(persistedToken)) {
           const session = yield* fetchRemoteSessionState({
             httpBaseUrl: config.httpBaseUrl.href,
