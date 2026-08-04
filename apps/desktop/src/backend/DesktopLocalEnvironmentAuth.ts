@@ -3,6 +3,7 @@ import {
   fetchRemoteSessionState,
 } from "@t3tools/client-runtime/authorization";
 import { PRIMARY_LOCAL_ENVIRONMENT_ID } from "@t3tools/contracts";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -14,6 +15,11 @@ import * as HttpClient from "effect/unstable/http/HttpClient";
 
 import * as DesktopBackendPool from "./DesktopBackendPool.ts";
 import * as DesktopLocalEnvironmentAuthTokenStore from "./DesktopLocalEnvironmentAuthTokenStore.ts";
+
+interface CachedBearerToken {
+  readonly token: string;
+  readonly expiresAtEpochMs: number;
+}
 
 export class DesktopLocalEnvironmentAuthBackendNotConfiguredError extends Schema.TaggedErrorClass<DesktopLocalEnvironmentAuthBackendNotConfiguredError>()(
   "DesktopLocalEnvironmentAuthBackendNotConfiguredError",
@@ -62,15 +68,18 @@ export const make = Effect.gen(function* () {
   const tokenStore =
     yield* DesktopLocalEnvironmentAuthTokenStore.DesktopLocalEnvironmentAuthTokenStore;
   const httpClient = yield* HttpClient.HttpClient;
-  const tokenRef = yield* Ref.make(Option.none<string>());
+  const tokenRef = yield* Ref.make(Option.none<CachedBearerToken>());
   const mutex = yield* Semaphore.make(1);
 
   const getBearerToken = mutex
     .withPermits(1)(
       Effect.gen(function* () {
         const cached = yield* Ref.get(tokenRef);
-        if (Option.isSome(cached)) {
-          return cached.value;
+        if (
+          Option.isSome(cached) &&
+          cached.value.expiresAtEpochMs > (yield* Clock.currentTimeMillis)
+        ) {
+          return cached.value.token;
         }
 
         const instances = yield* pool.list;
@@ -94,9 +103,15 @@ export const make = Effect.gen(function* () {
                 }),
             ),
           );
-          if (session.authenticated) {
-            yield* Ref.set(tokenRef, persistedToken);
-            return persistedToken.value;
+          if (session.authenticated && session.expiresAt !== undefined) {
+            const expiresAtEpochMs = session.expiresAt.epochMilliseconds;
+            if (expiresAtEpochMs > (yield* Clock.currentTimeMillis)) {
+              yield* Ref.set(
+                tokenRef,
+                Option.some({ token: persistedToken.value, expiresAtEpochMs }),
+              );
+              return persistedToken.value;
+            }
           }
           yield* tokenStore.clear.pipe(
             Effect.catch((error) =>
@@ -134,7 +149,13 @@ export const make = Effect.gen(function* () {
             }).pipe(Effect.as(false)),
           ),
         );
-        yield* Ref.set(tokenRef, Option.some(session.access_token));
+        yield* Ref.set(
+          tokenRef,
+          Option.some({
+            token: session.access_token,
+            expiresAtEpochMs: (yield* Clock.currentTimeMillis) + session.expires_in * 1_000,
+          }),
+        );
         return session.access_token;
       }),
     )

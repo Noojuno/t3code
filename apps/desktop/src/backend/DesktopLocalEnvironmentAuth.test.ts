@@ -3,6 +3,7 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
+import * as TestClock from "effect/testing/TestClock";
 import * as HttpClient from "effect/unstable/http/HttpClient";
 import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
 import { PRIMARY_LOCAL_ENVIRONMENT_ID } from "@t3tools/contracts";
@@ -41,6 +42,7 @@ function makePersistedSessionTestLayer(input: {
   readonly persistedToken: Ref.Ref<Option.Option<string>>;
   readonly tokenStoreOperations: Ref.Ref<ReadonlyArray<string>>;
   readonly tokenStoreReadError?: DesktopLocalEnvironmentAuthTokenStore.DesktopLocalEnvironmentAuthTokenStoreError;
+  readonly bootstrapExpiresInSeconds?: number;
   readonly sessionValidationResult: SessionValidationResult;
 }) {
   const httpClientLayer = Layer.succeed(
@@ -51,7 +53,7 @@ function makePersistedSessionTestLayer(input: {
             access_token: "desktop-bearer-token",
             issued_token_type: "urn:ietf:params:oauth:token-type:access_token",
             token_type: "Bearer",
-            expires_in: 3600,
+            expires_in: input.bootstrapExpiresInSeconds ?? 3600,
             scope: "orchestration:read",
           })
         : input.sessionValidationResult === "error"
@@ -68,7 +70,7 @@ function makePersistedSessionTestLayer(input: {
                 ? {
                     scopes: ["orchestration:read"],
                     sessionMethod: "bearer-access-token",
-                    expiresAt: "2026-08-01T00:00:00.000Z",
+                    expiresAt: "2100-01-01T00:00:00.000Z",
                   }
                 : {}),
             });
@@ -278,6 +280,42 @@ describe("DesktopLocalEnvironmentAuth", () => {
       assert.deepStrictEqual(yield* Ref.get(requests), []);
       assert.deepStrictEqual(yield* Ref.get(tokenStoreOperations), ["get"]);
       assert.deepStrictEqual(yield* Ref.get(persistedToken), Option.some("desktop-bearer-token"));
+    }),
+  );
+
+  it.effect("replaces the cached bearer token after it expires", () =>
+    Effect.gen(function* () {
+      const requests = yield* Ref.make<ReadonlyArray<string>>([]);
+      const persistedToken = yield* Ref.make(Option.none<string>());
+      const tokenStoreOperations = yield* Ref.make<ReadonlyArray<string>>([]);
+      const testLayer = makePersistedSessionTestLayer({
+        requests,
+        persistedToken,
+        tokenStoreOperations,
+        bootstrapExpiresInSeconds: 1,
+        sessionValidationResult: "unauthenticated",
+      });
+
+      yield* Effect.gen(function* () {
+        const auth = yield* DesktopLocalEnvironmentAuth.DesktopLocalEnvironmentAuth;
+        assert.strictEqual(yield* auth.getBearerToken, "desktop-bearer-token");
+        assert.strictEqual(yield* auth.getBearerToken, "desktop-bearer-token");
+        yield* TestClock.adjust("1 second");
+        assert.strictEqual(yield* auth.getBearerToken, "desktop-bearer-token");
+      }).pipe(Effect.provide(testLayer));
+
+      assert.deepStrictEqual(yield* Ref.get(requests), [
+        "http://127.0.0.1:3773/oauth/token",
+        "http://127.0.0.1:3773/api/auth/session",
+        "http://127.0.0.1:3773/oauth/token",
+      ]);
+      assert.deepStrictEqual(yield* Ref.get(tokenStoreOperations), [
+        "get",
+        "set:desktop-bearer-token",
+        "get",
+        "clear",
+        "set:desktop-bearer-token",
+      ]);
     }),
   );
 });
