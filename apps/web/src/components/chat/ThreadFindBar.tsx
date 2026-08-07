@@ -30,12 +30,7 @@ export function ThreadFindBar(props: ThreadFindBarProps) {
     if (!props.open) return;
 
     const closeOnEscape = (event: globalThis.KeyboardEvent) => {
-      if (
-        event.defaultPrevented ||
-        event.key !== "Escape" ||
-        event.isComposing ||
-        event.keyCode === 229
-      ) {
+      if (event.key !== "Escape" || event.isComposing || event.keyCode === 229) {
         return;
       }
       event.preventDefault();
