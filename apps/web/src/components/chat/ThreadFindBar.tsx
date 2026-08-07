@@ -30,13 +30,20 @@ export function ThreadFindBar(props: ThreadFindBarProps) {
     if (!props.open) return;
 
     const closeOnEscape = (event: globalThis.KeyboardEvent) => {
-      if (event.key !== "Escape" || event.isComposing || event.keyCode === 229) return;
+      if (
+        event.defaultPrevented ||
+        event.key !== "Escape" ||
+        event.isComposing ||
+        event.keyCode === 229
+      ) {
+        return;
+      }
       event.preventDefault();
       event.stopPropagation();
       props.onClose();
     };
-    window.addEventListener("keydown", closeOnEscape, true);
-    return () => window.removeEventListener("keydown", closeOnEscape, true);
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
   }, [props.onClose, props.open]);
 
   if (!props.open) return null;
