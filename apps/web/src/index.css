@@ -301,13 +301,13 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
 
 /* Paint find results without changing rendered markdown or copied text. */
 ::highlight(t3-thread-find) {
-  color: var(--foreground);
-  background-color: color-mix(in srgb, var(--warning) 35%, transparent);
+  color: var(--color-stone-950);
+  background-color: var(--color-amber-200);
 }
 
 ::highlight(t3-thread-find-active) {
-  color: var(--warning-foreground);
-  background-color: var(--warning);
+  color: var(--color-stone-950);
+  background-color: var(--color-amber-400);
 }
 
 @utility dialog-glass {
