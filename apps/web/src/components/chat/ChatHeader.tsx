@@ -46,6 +46,7 @@ import {
   WorkspaceBreadcrumbSeparator,
 } from "../WorkspaceBreadcrumb";
 import { cn } from "~/lib/utils";
+import { ThreadFindBar } from "./ThreadFindBar";
 
 interface ChatHeaderProps {
   activeThreadEnvironmentId: EnvironmentId;
@@ -68,6 +69,15 @@ interface ChatHeaderProps {
   readonly onOpenPullRequest?: ((number: number) => void) | undefined;
   onNewThreadInProject: () => void;
   onOpenProjectSettings?: (() => void) | undefined;
+  findOpen: boolean;
+  findQuery: string;
+  findMatchCount: number;
+  findActiveIndex: number;
+  findFocusRequestId: number;
+  onFindQueryChange: (query: string) => void;
+  onFindNext: () => void;
+  onFindPrevious: () => void;
+  onCloseFind: () => void;
   onRunProjectScript: (script: ProjectScript) => void;
   onAddProjectScript: (input: NewProjectScriptInput) => Promise<ProjectScriptActionResult>;
   onUpdateProjectScript: (
@@ -144,6 +154,15 @@ export const ChatHeader = memo(function ChatHeader({
   onAddProjectScript,
   onUpdateProjectScript,
   onDeleteProjectScript,
+  findOpen,
+  findQuery,
+  findMatchCount,
+  findActiveIndex,
+  findFocusRequestId,
+  onFindQueryChange,
+  onFindNext,
+  onFindPrevious,
+  onCloseFind,
 }: ChatHeaderProps) {
   const { active: panelAnimationsActive, durationMs: panelAnimationDurationMs } =
     usePanelAnimationSettings();
@@ -317,7 +336,7 @@ export const ChatHeader = memo(function ChatHeader({
   );
   return (
     <div
-      className="@container/header-actions flex min-w-0 flex-1 items-center gap-2 sm:gap-3"
+      className="@container/header-actions relative flex min-w-0 flex-1 self-stretch items-center gap-2 sm:gap-3"
       onContextMenu={handleHeaderContextMenu}
     >
       <WorkspaceBreadcrumb
@@ -448,6 +467,17 @@ export const ChatHeader = memo(function ChatHeader({
           />
         )}
       </div>
+      <ThreadFindBar
+        open={findOpen}
+        query={findQuery}
+        matchCount={findMatchCount}
+        activeIndex={findActiveIndex}
+        focusRequestId={findFocusRequestId}
+        onQueryChange={onFindQueryChange}
+        onNext={onFindNext}
+        onPrevious={onFindPrevious}
+        onClose={onCloseFind}
+      />
     </div>
   );
 });

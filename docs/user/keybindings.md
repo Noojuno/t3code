@@ -45,6 +45,13 @@ Combine keys with `!` for not, `&&` for and, `||` for or, and parentheses:
 { "key": "mod+j", "command": "terminal.toggle", "when": "terminalOpen && !terminalFocus" }
 ```
 
+## Find in the current thread
+
+`chat.find` searches loaded conversation messages and proposed plans in the active thread. Load
+earlier turns first to include older history. It defaults to
+`mod+f` outside terminals and previews. Press **Enter** or **Shift+Enter** to move between matches,
+and **Escape** to close find.
+
 ## Precedence
 
 The last rule whose key and condition both match wins, even if it belongs to a
