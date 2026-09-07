@@ -16,6 +16,7 @@ function messageEntry(
   role: "user" | "assistant" | "system",
   text: string,
   runId: RunId | null = null,
+  createdBy: "user" | "agent" = "user",
 ): TimelineEntry {
   return {
     id,
@@ -24,6 +25,7 @@ function messageEntry(
     message: {
       id: MessageId.make(id),
       role,
+      createdBy,
       text,
       runId,
       streaming: false,
@@ -64,6 +66,19 @@ function proposedPlanEntry(id: string, planMarkdown: string, runId: RunId | null
 }
 
 describe("searchableThreadEntryText", () => {
+  it("searches the displayed scheduled prompt without hidden automation attribution", () => {
+    const text = "[Triggered by schedule task: Daily audit]\n\nCheck the build";
+    for (const entry of [
+      messageEntry("m1", "user", text, null, "agent"),
+      messageEntry("scheduled-task-message:task-1:1788661140000:scheduled", "user", text),
+    ]) {
+      expect(searchableThreadEntryText(entry)).toBe("Check the build");
+      expect(buildThreadFindMatches([entry], "Daily audit")).toEqual([]);
+      expect(buildThreadFindMatches([entry], "build")).toHaveLength(1);
+    }
+    expect(searchableThreadEntryText(messageEntry("m1", "user", text))).toBe(text);
+  });
+
   it("searches displayed user text without appended context payloads", () => {
     const prompt = [
       "check the build",

@@ -1,5 +1,6 @@
 import type { RunAttemptId, RunId } from "@t3tools/contracts";
 import { findThreadSearchOccurrences } from "@t3tools/client-runtime/state/thread-search";
+import { resolveUserMessagePresentation } from "@t3tools/client-runtime/user-message";
 import type { TimelineEntry } from "../../session-logic";
 import { stripDisplayedPlanMarkdown } from "../../proposedPlan";
 import { deriveDisplayedUserMessageContent } from "~/lib/visibleMessageText";
@@ -26,7 +27,8 @@ export function searchableThreadEntryText(entry: TimelineEntry): string | null {
   }
   if (entry.kind !== "message") return null;
   if (entry.message.role === "user") {
-    const displayed = deriveDisplayedUserMessageContent(entry.message.text);
+    const userMessage = resolveUserMessagePresentation(entry.message);
+    const displayed = deriveDisplayedUserMessageContent(userMessage.text);
     return displayed.terminalContexts.reduce(
       (text, context) => text.replaceAll(formatInlineTerminalContextLabel(context.header), ""),
       displayed.visibleText,
