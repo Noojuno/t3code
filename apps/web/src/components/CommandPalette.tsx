@@ -1061,6 +1061,33 @@ function OpenCommandPaletteDialog(props: {
     ],
   );
 
+  const renderProjectDescription = useCallback(
+    (project: Project) => {
+      const location = projectEnvironmentLocationById.get(project.environmentId) ?? {
+        kind: "remote",
+        label: "Remote",
+        machine: "server" as const,
+      };
+      return (
+        <span className="flex min-w-0 items-center gap-1">
+          <span className="inline-flex min-w-0 items-center gap-1">
+            {location.kind === "remote" ? (
+              <EnvironmentMachineIcon
+                aria-hidden
+                kind={location.machine}
+                className={COMMAND_PALETTE_META_ICON_CLASS}
+              />
+            ) : null}
+            <span className="truncate">{location.label}</span>
+          </span>
+          <CommandPaletteMetaDot />
+          <span className="truncate">{project.workspaceRoot}</span>
+        </span>
+      );
+    },
+    [projectEnvironmentLocationById],
+  );
+
   const projectSearchItems = useMemo(
     () =>
       buildProjectActionItems({
@@ -1068,14 +1095,24 @@ function OpenCommandPaletteDialog(props: {
         valuePrefix: "project",
         searchTerms: (project) => {
           const group = projectGroupByTargetKey.get(`${project.environmentId}:${project.id}`);
-          return (
-            group?.memberProjects.flatMap((member) => [member.title, member.workspaceRoot]) ?? []
-          );
+          const location = projectEnvironmentLocationById.get(project.environmentId);
+          return [
+            ...(group?.memberProjects.flatMap((member) => [member.title, member.workspaceRoot]) ??
+              []),
+            ...(location ? [location.label] : []),
+          ];
         },
+        renderDescription: renderProjectDescription,
         icon: projectFavicon,
         runProject: openProjectFromSearch,
       }),
-    [openProjectFromSearch, pickerProjects, projectGroupByTargetKey],
+    [
+      openProjectFromSearch,
+      pickerProjects,
+      projectEnvironmentLocationById,
+      projectGroupByTargetKey,
+      renderProjectDescription,
+    ],
   );
 
   const projectThreadItems = useMemo(
@@ -1093,29 +1130,7 @@ function OpenCommandPaletteDialog(props: {
               ...(location ? [location.label] : []),
             ];
           },
-          renderDescription: (project) => {
-            const location = projectEnvironmentLocationById.get(project.environmentId) ?? {
-              kind: "remote",
-              label: "Remote",
-              machine: "server" as const,
-            };
-            return (
-              <span className="flex min-w-0 items-center gap-1">
-                <span className="inline-flex min-w-0 items-center gap-1">
-                  {location.kind === "remote" ? (
-                    <EnvironmentMachineIcon
-                      aria-hidden
-                      kind={location.machine}
-                      className={COMMAND_PALETTE_META_ICON_CLASS}
-                    />
-                  ) : null}
-                  <span className="truncate">{location.label}</span>
-                </span>
-                <CommandPaletteMetaDot />
-                <span className="truncate">{project.workspaceRoot}</span>
-              </span>
-            );
-          },
+          renderDescription: renderProjectDescription,
           icon: projectFavicon,
           runProject: async (project) => {
             const group = projectGroupByTargetKey.get(`${project.environmentId}:${project.id}`);
@@ -1140,6 +1155,7 @@ function OpenCommandPaletteDialog(props: {
       pickerProjects,
       projectEnvironmentLocationById,
       projectGroupByTargetKey,
+      renderProjectDescription,
     ],
   );
 
