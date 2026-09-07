@@ -394,6 +394,31 @@ it.layer(ClaudeTextGenerationTestLayer)("ClaudeTextGeneration", (it) => {
     }),
   );
 
+  for (const verbose of [false, true]) {
+    it.effect(`unwraps a JSON title in ${verbose ? "verbose" : "normal"} Claude output`, () => {
+      const result = {
+        type: "result",
+        structured_output: { title: '{"title": "Refresh ev-stg APP ASG instances"}' },
+      };
+      return withFakeClaudeEnv(
+        { output: JSON.stringify(verbose ? [result] : result) },
+        (textGeneration) =>
+          Effect.gen(function* () {
+            const generated = yield* textGeneration.generateThreadTitle({
+              cwd: process.cwd(),
+              message: "Refresh ev-stg APP ASG instances",
+              modelSelection: {
+                instanceId: ProviderInstanceId.make("claudeAgent"),
+                model: SYNTHETIC_CLAUDE_STANDARD_MODEL,
+              },
+            });
+
+            expect(generated.title).toBe("Refresh ev-stg APP ASG instances");
+          }),
+      );
+    });
+  }
+
   for (const previousTitle of [undefined, "Old thread title"]) {
     it.effect(
       `reads the result from verbose Claude output when ${previousTitle ? "regenerating" : "generating"} a title`,
