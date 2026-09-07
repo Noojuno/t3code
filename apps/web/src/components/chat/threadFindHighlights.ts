@@ -1,8 +1,8 @@
 import { findThreadSearchOccurrences } from "@t3tools/client-runtime/state/thread-search";
 import { useCallback, useEffect } from "react";
 
-export const THREAD_FIND_HIGHLIGHT_NAME = "t3-thread-find";
-export const THREAD_FIND_ACTIVE_HIGHLIGHT_NAME = "t3-thread-find-active";
+const THREAD_FIND_HIGHLIGHT_NAME = "t3-thread-find";
+const THREAD_FIND_ACTIVE_HIGHLIGHT_NAME = "t3-thread-find-active";
 
 const THREAD_FIND_TEXT_SELECTOR = "[data-thread-find-text]";
 const THREAD_FIND_IGNORE_SELECTOR = "[data-thread-find-ignore]";
@@ -33,7 +33,7 @@ function resolveHighlightApi(): {
 }
 
 /** Collects visible occurrences without modifying rendered markdown. */
-export function collectThreadFindRanges(container: HTMLElement, query: string): ThreadFindRange[] {
+function collectThreadFindRanges(container: HTMLElement, query: string): ThreadFindRange[] {
   if (query.length === 0) return [];
 
   const ranges: ThreadFindRange[] = [];
