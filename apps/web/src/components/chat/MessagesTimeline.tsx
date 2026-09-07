@@ -197,6 +197,8 @@ import {
   type TimelineLatestTurn,
   type WorkGroupScrollAnchor,
 } from "./MessagesTimeline.logic";
+import { type ThreadFindMatch } from "./threadFind";
+import { useThreadFindHighlights } from "./threadFindHighlights";
 import { TerminalContextInlineChip } from "./TerminalContextInlineChip";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Spinner } from "../ui/spinner";
@@ -277,6 +279,7 @@ interface TimelineRowSharedState {
   activeThreadEnvironmentId: EnvironmentId;
   onRevertToTurnCount: (targetTurnCount: number, messageId: MessageId) => void;
   onUseArtifactTemplate: (template: CodexArtifactTemplate) => void;
+  findActive: boolean;
   onImageExpand: (preview: ExpandedImagePreview) => void;
   onFileOpen: (attachment: ChatFileAttachment) => void;
   onFileDownload: (attachment: ChatFileAttachment) => void;
@@ -386,6 +389,7 @@ const TIMELINE_MAINTAIN_SCROLL_AT_END_SMOOTH = {
   ...TIMELINE_MAINTAIN_SCROLL_AT_END,
   animated: true,
 } as const satisfies MaintainScrollAtEndOptions;
+const FIND_MATCH_VIEW_MARGIN = 96;
 
 // ---------------------------------------------------------------------------
 // Props (public API)
@@ -463,6 +467,9 @@ interface MessagesTimelineProps {
   onSteerQueuedMessage?: (id: string) => void;
   steerQueuedMessageShortcutLabel?: string | null;
   onRemoveQueuedMessage?: (id: string) => void;
+  findQuery?: string;
+  activeFindMatch?: ThreadFindMatch | null;
+  findNavigationId?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -520,6 +527,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   onSteerQueuedMessage = NOOP_QUEUED_MESSAGE_ACTION,
   steerQueuedMessageShortcutLabel = null,
   onRemoveQueuedMessage = NOOP_QUEUED_MESSAGE_ACTION,
+  findQuery = "",
+  activeFindMatch = null,
+  findNavigationId = 0,
 }: MessagesTimelineProps) {
   const listIdentityKey = displayThreadKey ?? routeThreadKey;
   const rememberedPosition = useMemo(
@@ -597,6 +607,9 @@ export const MessagesTimeline = memo(function MessagesTimeline({
   const disclosureAnchorKeyRef = useRef<string | null>(null);
   const disclosureSettleFrameRef = useRef<number | null>(null);
   const disclosureSettleSecondFrameRef = useRef<number | null>(null);
+  const normalizedFindQuery = findQuery.trim();
+  const findActive = normalizedFindQuery.length > 0;
+
   useEffect(() => {
     return () => {
       if (disclosureSettleFrameRef.current !== null) {
@@ -736,6 +749,14 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     });
   }, [latestTurn]);
 
+  const activeFindTurnId = activeFindMatch?.turnId;
+  const visibleExpandedTurnIds = useMemo(() => {
+    if (!activeFindTurnId || expandedTurnIds.has(activeFindTurnId)) {
+      return expandedTurnIds;
+    }
+    return new Set(expandedTurnIds).add(activeFindTurnId);
+  }, [activeFindTurnId, expandedTurnIds]);
+
   const rowsProjectionRef = useRef<{
     threadKey: string;
     workspaceRoot: string | undefined;
@@ -771,7 +792,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
         timelineEntries,
         latestTurn,
         runningTurnId,
-        expandedTurnIds: paintedExpandedTurnIds,
+        expandedTurnIds: visibleExpandedTurnIds,
         expandedWorkGroupIds: paintedExpandedWorkGroupIds,
         isWorking,
         activeTurnStartedAt,
@@ -794,7 +815,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
     timelineEntries,
     latestTurn,
     runningTurnId,
-    paintedExpandedTurnIds,
+    visibleExpandedTurnIds,
     paintedExpandedWorkGroupIds,
     isWorking,
     activeTurnStartedAt,
@@ -1138,6 +1159,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       activeThreadEnvironmentId,
       onRevertToTurnCount,
       onUseArtifactTemplate,
+      findActive,
       onImageExpand,
       onFileOpen,
       onFileDownload,
@@ -1173,6 +1195,7 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       activeThreadEnvironmentId,
       onRevertToTurnCount,
       onUseArtifactTemplate,
+      findActive,
       onImageExpand,
       onFileOpen,
       onFileDownload,
@@ -1229,6 +1252,63 @@ export const MessagesTimeline = memo(function MessagesTimeline({
       runningTurnId,
     ],
   );
+
+  const activeFindMatchKey = activeFindMatch
+    ? `${findNavigationId}:${normalizedFindQuery}:${activeFindMatch.entryId}:${activeFindMatch.occurrence}`
+    : null;
+  const revealActiveFindRange = useCallback(
+    (range: Range | null) => {
+      if (!range) return;
+
+      const matchRect = range.getBoundingClientRect();
+      const viewportRect = timelineViewportElement?.getBoundingClientRect();
+      if (!viewportRect || matchRect.height === 0) return;
+
+      const topBoundary = viewportRect.top + FIND_MATCH_VIEW_MARGIN;
+      const bottomBoundary =
+        viewportRect.bottom - FIND_MATCH_VIEW_MARGIN - contentInsetEndAdjustment;
+      let delta = 0;
+      if (matchRect.top < topBoundary) delta = matchRect.top - topBoundary;
+      else if (matchRect.bottom > bottomBoundary) delta = matchRect.bottom - bottomBoundary;
+      if (Math.abs(delta) < 1) return;
+
+      const currentScroll = listRef.current?.getState?.().scroll;
+      if (typeof currentScroll === "number") {
+        listRef.current?.scrollToOffset({ offset: currentScroll + delta, animated: false });
+      }
+    },
+    [contentInsetEndAdjustment, listRef, timelineViewportElement],
+  );
+
+  const navigatedFindMatchKeyRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!activeFindMatch || !activeFindMatchKey) {
+      navigatedFindMatchKeyRef.current = null;
+      return;
+    }
+
+    const rowIndex = rows.findIndex((row) => row.id === activeFindMatch.entryId);
+    if (rowIndex === -1) return;
+
+    if (navigatedFindMatchKeyRef.current === activeFindMatchKey) return;
+    navigatedFindMatchKeyRef.current = activeFindMatchKey;
+
+    onManualNavigation();
+    void listRef.current?.scrollToIndex({
+      index: rowIndex,
+      animated: false,
+      viewOffset: FIND_MATCH_VIEW_MARGIN,
+    });
+  }, [activeFindMatch, activeFindMatchKey, listRef, onManualNavigation, rows]);
+
+  useThreadFindHighlights({
+    container: timelineViewportElement,
+    query: normalizedFindQuery,
+    activeRowId: activeFindMatch?.entryId ?? null,
+    activeOccurrence: activeFindMatch?.occurrence ?? 0,
+    onActiveRange: revealActiveFindRange,
+  });
 
   // Stable renderItem — no closure deps. Row components read shared state
   // from TimelineRowCtx, which propagates through LegendList's memo.
@@ -2188,6 +2268,7 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
         ) : null}
         <div onCopyCapture={onBodyCopyCapture}>
           <CollapsibleUserMessageBody
+            expandForFind={ctx.findActive}
             text={resolvedContext.text}
             renderContextReference={renderContextReference}
             skills={ctx.skills}
@@ -2358,6 +2439,7 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
     <>
       <div className="relative min-w-0 px-1 py-0.5">
         <MessageAuthorHeading>T3 Code</MessageAuthorHeading>
+        <div data-thread-find-text="true">
         <AssistantCitationSource
           messageId={row.message.id}
           {...(ctx.threadRef ? { threadRef: ctx.threadRef } : {})}
@@ -2377,6 +2459,7 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
             onImageExpand={ctx.onImageExpand}
           />
         </AssistantCitationSource>
+        </div>
         <AssistantChangedFilesSection
           turnSummary={row.assistantTurnDiffSummary}
           routeThreadKey={ctx.routeThreadKey}
@@ -2495,6 +2578,7 @@ function ProposedPlanTimelineRow({
         threadRef={ctx.threadRef ?? undefined}
         cwd={ctx.markdownCwd}
         workspaceRoot={ctx.workspaceRoot}
+        expandForFind={ctx.findActive}
       />
     </div>
   );
@@ -3941,12 +4025,14 @@ const CollapsibleUserMessageBody = memo(function CollapsibleUserMessageBody(prop
   renderContextReference: (reference: ChatMarkdownContextReference) => ReactNode;
   skills: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">>;
   markdownCwd: string | undefined;
+  expandForFind?: boolean;
   footer?: ReactNode;
 }) {
   const [expanded, setExpanded] = useState(false);
   const hasVisibleBody = props.text.trim().length > 0;
   const canCollapse = hasVisibleBody && shouldCollapseUserMessage(props.text);
-  const isCollapsed = canCollapse && !expanded;
+  const isCollapsed = canCollapse && !expanded && !props.expandForFind;
+  const showCollapseControl = canCollapse && !props.expandForFind;
 
   return (
     <div>
@@ -3954,6 +4040,7 @@ const CollapsibleUserMessageBody = memo(function CollapsibleUserMessageBody(prop
         <div
           className={cn("relative", isCollapsed && "max-h-44 overflow-hidden")}
           data-user-message-body="true"
+          data-thread-find-text="true"
           data-user-message-collapsed={isCollapsed ? "true" : "false"}
           data-user-message-collapsible={canCollapse ? "true" : "false"}
           data-user-message-fade={isCollapsed ? "true" : "false"}
@@ -3974,15 +4061,15 @@ const CollapsibleUserMessageBody = memo(function CollapsibleUserMessageBody(prop
           />
         </div>
       ) : null}
-      {canCollapse || props.footer ? (
+      {showCollapseControl || props.footer ? (
         <div
           className={cn(
             "mt-1.5 flex items-center gap-2",
-            canCollapse && props.footer ? "justify-between" : "justify-end",
+            showCollapseControl && props.footer ? "justify-between" : "justify-end",
           )}
           data-user-message-footer="true"
         >
-          {canCollapse ? (
+          {showCollapseControl ? (
             <Button
               type="button"
               size="xs"
