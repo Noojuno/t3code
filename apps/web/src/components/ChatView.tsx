@@ -285,7 +285,6 @@ import {
   preventRepeatedTerminalCloseShortcut,
   preventTerminalCloseShortcut,
 } from "../lib/terminalCloseShortcut";
-import { isPreviewFocused } from "../lib/previewFocus";
 import { resolveNewDraftStartFromOrigin } from "../lib/chatThreadActions";
 import {
   derivePhysicalProjectKey,
