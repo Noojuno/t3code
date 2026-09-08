@@ -61,10 +61,11 @@ export function ThreadFindBar(props: ThreadFindBarProps) {
   return (
     <InputGroup
       variant="popover"
+      size="lg"
       role="search"
       aria-label="Find in thread"
       aria-busy={props.historyState === "loading"}
-      className="absolute top-[calc(100%+0.5rem)] right-0 z-40 h-9 w-[min(24rem,calc(100vw-1.5rem))] [-webkit-app-region:no-drag]"
+      className="absolute top-[calc(100%+0.5rem)] right-0 z-40 w-[min(24rem,calc(100vw-1.5rem))] [-webkit-app-region:no-drag]"
     >
       <InputGroupInput
         ref={inputRef}
