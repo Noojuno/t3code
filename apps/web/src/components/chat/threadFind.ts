@@ -1,9 +1,13 @@
 import type { TurnId } from "@t3tools/contracts";
 import { findThreadSearchOccurrences } from "@t3tools/client-runtime/state/thread-search";
 import type { TimelineEntry } from "../../session-logic";
-import { stripDisplayedPlanMarkdown } from "../../proposedPlan";
+import { proposedPlanTitle, stripDisplayedPlanMarkdown } from "../../proposedPlan";
 import { deriveDisplayedUserMessageContent } from "~/lib/visibleMessageText";
-import { formatInlineTerminalContextLabel } from "./userMessageTerminalContexts";
+import {
+  formatInlineTerminalContextLabel,
+  textContainsInlineTerminalContextLabels,
+} from "./userMessageTerminalContexts";
+import { markdownThreadFindText } from "./threadFindText";
 
 /** One occurrence of the query inside a searchable timeline entry. */
 export interface ThreadFindMatch {
@@ -14,24 +18,60 @@ export interface ThreadFindMatch {
   readonly occurrence: number;
 }
 
-/**
- * Returns the conversation text represented by an entry. Work and lifecycle
- * rows are intentionally excluded.
- */
-export function searchableThreadEntryText(entry: TimelineEntry): string | null {
+// Message/plan records are immutable and survive timeline rebuilds during streaming.
+// Weak keys reuse parsed text across keystrokes without retaining old messages.
+const entryTextCache = new WeakMap<object, readonly string[] | null>();
+
+function searchableThreadEntrySegments(entry: TimelineEntry): readonly string[] | null {
+  const key =
+    entry.kind === "message"
+      ? entry.message
+      : entry.kind === "proposed-plan"
+        ? entry.proposedPlan
+        : entry;
+  if (entryTextCache.has(key)) return entryTextCache.get(key)!;
+  const segments = deriveThreadEntrySegments(entry);
+  entryTextCache.set(key, segments);
+  return segments;
+}
+
+function deriveThreadEntrySegments(entry: TimelineEntry): readonly string[] | null {
   if (entry.kind === "proposed-plan") {
-    return stripDisplayedPlanMarkdown(entry.proposedPlan.planMarkdown);
+    const markdown = entry.proposedPlan.planMarkdown;
+    return [
+      proposedPlanTitle(markdown) ?? "Proposed plan",
+      ...markdownThreadFindText(stripDisplayedPlanMarkdown(markdown)),
+    ];
   }
   if (entry.kind !== "message") return null;
   if (entry.message.role === "user") {
-    const displayed = deriveDisplayedUserMessageContent(entry.message.text);
-    return displayed.terminalContexts.reduce(
-      (text, context) => text.replaceAll(formatInlineTerminalContextLabel(context.header), ""),
-      displayed.visibleText,
-    );
+    const { visibleText, terminalContexts } = deriveDisplayedUserMessageContent(entry.message.text);
+    if (
+      !terminalContexts.length ||
+      !textContainsInlineTerminalContextLabels(visibleText, terminalContexts)
+    ) {
+      return markdownThreadFindText(visibleText, true);
+    }
+    const segments: string[] = [];
+    let cursor = 0;
+    for (const context of terminalContexts) {
+      const label = formatInlineTerminalContextLabel(context.header);
+      const index = visibleText.indexOf(label, cursor);
+      segments.push(...markdownThreadFindText(visibleText.slice(cursor, index), true));
+      cursor = index + label.length;
+    }
+    segments.push(...markdownThreadFindText(visibleText.slice(cursor), true));
+    return segments;
   }
   if (entry.message.role !== "assistant") return null;
-  return entry.message.text || (entry.message.streaming ? "" : "(empty response)");
+  return markdownThreadFindText(
+    entry.message.text || (entry.message.streaming ? "" : "(empty response)"),
+  );
+}
+
+/** Conversation text only: source-only Markdown and generated controls are excluded. */
+export function searchableThreadEntryText(entry: TimelineEntry): string | null {
+  return searchableThreadEntrySegments(entry)?.join("\n") ?? null;
 }
 
 function threadEntryTurnId(entry: TimelineEntry): TurnId | null {
@@ -49,11 +89,14 @@ export function buildThreadFindMatches(
 
   const matches: ThreadFindMatch[] = [];
   for (const entry of entries) {
-    const text = searchableThreadEntryText(entry);
-    if (text === null) continue;
+    const segments = searchableThreadEntrySegments(entry);
+    if (segments === null) continue;
 
-    const offsets = findThreadSearchOccurrences(text, normalizedQuery);
-    for (let occurrence = 0; occurrence < offsets.length; occurrence += 1) {
+    const total = segments.reduce(
+      (count, text) => count + findThreadSearchOccurrences(text, normalizedQuery).length,
+      0,
+    );
+    for (let occurrence = 0; occurrence < total; occurrence += 1) {
       matches.push({
         entryId: entry.id,
         turnId: threadEntryTurnId(entry),

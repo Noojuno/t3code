@@ -1,5 +1,6 @@
 import { findThreadSearchOccurrences } from "@t3tools/client-runtime/state/thread-search";
 import { useCallback, useEffect } from "react";
+import { THREAD_FIND_BLOCK_TAGS } from "./threadFindText";
 
 const THREAD_FIND_HIGHLIGHT_NAME = "t3-thread-find";
 const THREAD_FIND_ACTIVE_HIGHLIGHT_NAME = "t3-thread-find-active";
@@ -44,25 +45,44 @@ function collectThreadFindRanges(container: HTMLElement, query: string): ThreadF
     const rowId = scope.closest("[data-timeline-row-id]")?.getAttribute("data-timeline-row-id");
     if (!rowId) continue;
 
-    const walker = container.ownerDocument.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
-    let node = walker.nextNode();
-    while (node) {
-      if (node.parentElement?.closest(THREAD_FIND_IGNORE_SELECTOR)) {
-        node = walker.nextNode();
-        continue;
-      }
-
-      const text = node.nodeValue ?? "";
+    let text = "";
+    let nodes: { node: Node; start: number; end: number }[] = [];
+    const flush = () => {
       for (const offset of findThreadSearchOccurrences(text, query)) {
+        const start = nodes.find((part) => part.end > offset);
+        const end = nodes.find((part) => part.end >= offset + query.length);
+        if (!start || !end) continue;
         const range = container.ownerDocument.createRange();
-        range.setStart(node, offset);
-        range.setEnd(node, offset + query.length);
+        range.setStart(start.node, offset - start.start);
+        range.setEnd(end.node, offset + query.length - end.start);
         const occurrence = occurrenceByRowId.get(rowId) ?? 0;
         ranges.push({ rowId, occurrence, range });
         occurrenceByRowId.set(rowId, occurrence + 1);
       }
-      node = walker.nextNode();
-    }
+      text = "";
+      nodes = [];
+    };
+    const visit = (node: Node, inPre = false) => {
+      const element = node.nodeType === 1 ? (node as Element) : null;
+      if (element?.matches("svg")) return;
+      if (element?.matches(`${THREAD_FIND_IGNORE_SELECTOR}, [role="toolbar"]`)) {
+        flush();
+        return;
+      }
+      const tag = element?.tagName.toLowerCase() ?? "";
+      const block = THREAD_FIND_BLOCK_TAGS.has(tag);
+      if (block) flush();
+      if (node.nodeType === 3) {
+        const value = node.nodeValue ?? "";
+        const start = text.length;
+        text += inPre ? value : value.replace(/\n/g, " ");
+        nodes.push({ node, start, end: text.length });
+      }
+      for (const child of node.childNodes) visit(child, inPre || tag === "pre");
+      if (block) flush();
+    };
+    visit(scope);
+    flush();
   }
   return ranges;
 }

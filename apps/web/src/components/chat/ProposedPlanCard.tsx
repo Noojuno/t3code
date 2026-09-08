@@ -155,7 +155,7 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
           <Badge variant="secondary">Plan</Badge>
           {/* Same heading level as the message author headings in the timeline,
               so a plan's own headings nest beneath it in the outline. */}
-          <h3 className="truncate text-sm font-medium text-foreground">{title}</h3>
+          <h3 data-thread-find-text="true" className="truncate text-sm font-medium text-foreground">{title}</h3>
         </div>
         <Menu>
           <MenuTrigger
