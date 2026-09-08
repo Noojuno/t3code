@@ -1986,7 +1986,7 @@ export const OrchestrationSearchThreadResult = Schema.Struct({
 });
 export type OrchestrationSearchThreadResult = typeof OrchestrationSearchThreadResult.Type;
 
-export class OrchestrationSearchThreadError extends Schema.TaggedErrorClass<OrchestrationSearchThreadError>()(
+export class OrchestrationSearchThreadError extends Schema.TaggedError<OrchestrationSearchThreadError>()(
   "OrchestrationSearchThreadError",
   { message: Schema.String, cause: Schema.Defect() },
 ) {}
