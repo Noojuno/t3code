@@ -1602,6 +1602,7 @@ export default function ChatView(props: ChatViewProps) {
       cursor:
         routeThreadState.page._tag === "Some" ? routeThreadState.page.value.beforeCursor : null,
       onLoadEarlier: () =>
+        routeThreadState.status === "live" &&
         requestOlderThreadTurns(routeThreadRef.environmentId, routeThreadRef.threadId),
     };
   }, [routeKind, routeThreadRef, routeThreadState]);
@@ -6689,7 +6690,7 @@ export default function ChatView(props: ChatViewProps) {
     () =>
       buildThreadFindMatches(
         timelineEntries,
-        isThreadFindActive && !threadFindHistoryState ? findState.query : "",
+        isThreadFindActive && threadFindHistoryState !== "loading" ? findState.query : "",
       ),
     [findState.query, isThreadFindActive, threadFindHistoryState, timelineEntries],
   );

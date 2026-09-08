@@ -86,18 +86,17 @@ export function ThreadFindBar(props: ThreadFindBarProps) {
             noResults ? "text-destructive" : "text-muted-foreground",
           )}
         >
-          {props.historyState === "loading" ? (
-            "Searching…"
-          ) : props.historyState === "incomplete" ? (
-            <Button size="xs" variant="ghost" onClick={props.onRetryHistory}>
-              Search older
-            </Button>
-          ) : hasQuery ? (
-            formatThreadFindCount(props.activeIndex, props.matchCount)
-          ) : (
-            ""
-          )}
+          {props.historyState === "loading"
+            ? "Searching…"
+            : hasQuery
+              ? `${formatThreadFindCount(props.activeIndex, props.matchCount)}${props.historyState === "incomplete" ? " (partial)" : ""}`
+              : ""}
         </span>
+        {props.historyState === "incomplete" ? (
+          <Button size="xs" variant="ghost" onClick={props.onRetryHistory}>
+            Search older
+          </Button>
+        ) : null}
         <Button
           size="icon-xs"
           variant="ghost"

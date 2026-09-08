@@ -12,11 +12,11 @@ export function useThreadFindHistory(
 ): "loading" | "incomplete" | null {
   const requested = useRef<{ key: string; cursors: Set<string>; loading: boolean } | null>(null);
   const [failedKey, setFailedKey] = useState<string | null>(null);
+  if (requestKey === null && failedKey !== null) setFailedKey(null);
 
   useEffect(() => {
     if (requestKey === null) {
       requested.current = null;
-      setFailedKey(null);
       return;
     }
     if (requested.current?.key !== requestKey) {
