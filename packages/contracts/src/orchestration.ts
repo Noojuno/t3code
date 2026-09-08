@@ -2316,7 +2316,7 @@ export type OrchestrationSearchThreadResult = typeof OrchestrationSearchThreadRe
 
 export class OrchestrationSearchThreadError extends Schema.TaggedErrorClass<OrchestrationSearchThreadError>()(
   "OrchestrationSearchThreadError",
-  { message: Schema.String, cause: Schema.optional(Schema.Defect()) },
+  { message: Schema.String, cause: Schema.Defect() },
 ) {}
 
 export const OrchestrationGetWorkflowScriptInput = Schema.Struct({
