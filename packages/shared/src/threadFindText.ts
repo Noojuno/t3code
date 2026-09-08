@@ -69,7 +69,7 @@ interface TextTree {
 }
 
 /** Uses the renderer's Markdown transforms, without mounting folded/virtualized rows. */
-export function markdownThreadFindText(markdown: string, userMessage = false): string[] {
+function markdownThreadFindText(markdown: string, userMessage = false): string[] {
   const processor = userMessage ? userProcessor : assistantProcessor;
   const tree = processor.runSync(processor.parse(markdown));
   const segments: string[] = [];
