@@ -20,7 +20,6 @@ interface ThreadFindBarProps {
 }
 
 export function ThreadFindBar(props: ThreadFindBarProps) {
-  const { onClose, open } = props;
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
@@ -28,21 +27,6 @@ export function ThreadFindBar(props: ThreadFindBarProps) {
     inputRef.current?.focus();
     inputRef.current?.select();
   }, [props.focusRequestId, props.open]);
-
-  useEffect(() => {
-    if (!open) return;
-
-    const closeOnEscape = (event: globalThis.KeyboardEvent) => {
-      if (event.key !== "Escape" || event.isComposing || event.keyCode === 229) {
-        return;
-      }
-      event.preventDefault();
-      event.stopPropagation();
-      onClose();
-    };
-    window.addEventListener("keydown", closeOnEscape);
-    return () => window.removeEventListener("keydown", closeOnEscape);
-  }, [onClose, open]);
 
   if (!props.open) return null;
 
