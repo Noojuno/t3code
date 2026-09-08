@@ -9,6 +9,8 @@ interface ThreadFindBarProps {
   readonly open: boolean;
   readonly query: string;
   readonly matchCount: number;
+  readonly historyState: "loading" | "incomplete" | null;
+  readonly onRetryHistory: () => void;
   readonly activeIndex: number;
   readonly focusRequestId: number;
   readonly onQueryChange: (query: string) => void;
@@ -45,7 +47,7 @@ export function ThreadFindBar(props: ThreadFindBarProps) {
   if (!props.open) return null;
 
   const hasQuery = props.query.trim().length > 0;
-  const noResults = hasQuery && props.matchCount === 0;
+  const noResults = hasQuery && !props.historyState && props.matchCount === 0;
   const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
     if (event.key === "Enter") {
@@ -61,6 +63,7 @@ export function ThreadFindBar(props: ThreadFindBarProps) {
       variant="popover"
       role="search"
       aria-label="Find in thread"
+      aria-busy={props.historyState === "loading"}
       className="absolute top-[calc(100%+0.5rem)] right-0 z-40 h-9 w-[min(24rem,calc(100vw-1.5rem))] [-webkit-app-region:no-drag]"
     >
       <InputGroupInput
@@ -83,7 +86,17 @@ export function ThreadFindBar(props: ThreadFindBarProps) {
             noResults ? "text-destructive" : "text-muted-foreground",
           )}
         >
-          {hasQuery ? formatThreadFindCount(props.activeIndex, props.matchCount) : ""}
+          {props.historyState === "loading" ? (
+            "Searching…"
+          ) : props.historyState === "incomplete" ? (
+            <Button size="xs" variant="ghost" onClick={props.onRetryHistory}>
+              Search older
+            </Button>
+          ) : hasQuery ? (
+            formatThreadFindCount(props.activeIndex, props.matchCount)
+          ) : (
+            ""
+          )}
         </span>
         <Button
           size="icon-xs"

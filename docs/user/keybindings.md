@@ -47,8 +47,9 @@ Combine keys with `!` for not, `&&` for and, `||` for or, and parentheses:
 
 ## Find in the current thread
 
-`chat.find` searches loaded conversation messages and proposed plans in the active thread. Load
-earlier turns first to include older history. It defaults to
+`chat.find` searches conversation messages and proposed plans in the active thread. Entering a
+query loads earlier history before showing the match total. If loading stops, select **Search older**
+to retry. It defaults to
 `mod+f` outside terminals and previews. Press **Enter** or **Shift+Enter** to move between matches,
 and **Escape** to close find.
 

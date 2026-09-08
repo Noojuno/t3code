@@ -1,3 +1,4 @@
+import { useThreadFindHistory } from "./chat/useThreadFindHistory";
 import { useLoadBalancedEnvironment } from "../hooks/useLoadBalancedEnvironment";
 import type { UsageLimitSourceSnapshots } from "@t3tools/contracts";
 import {
@@ -1507,9 +1508,8 @@ export default function ChatView(props: ChatViewProps) {
       loading: routeThreadState.page._tag === "Some" && routeThreadState.page.value.loadingOlder,
       cursor:
         routeThreadState.page._tag === "Some" ? routeThreadState.page.value.beforeCursor : null,
-      onLoadEarlier: () => {
-        requestOlderThreadTurns(routeThreadRef.environmentId, routeThreadRef.threadId);
-      },
+      onLoadEarlier: () =>
+        requestOlderThreadTurns(routeThreadRef.environmentId, routeThreadRef.threadId),
     };
   }, [routeKind, routeThreadRef, routeThreadState]);
   const markThreadVisited = useUiStateStore((store) => store.markThreadVisited);
@@ -6074,9 +6074,19 @@ export default function ChatView(props: ChatViewProps) {
     setFindState((state) => ({ ...state, query, activeIndex: 0 }));
   }, []);
   const isThreadFindActive = activeThreadKey !== null && findState.threadKey === activeThreadKey;
+  const threadFindHistoryState = useThreadFindHistory(
+    isThreadFindActive && findState.query.trim()
+      ? `${activeThreadKey}:${findState.focusRequestId}`
+      : null,
+    loadEarlierTurns,
+  );
   const threadFindMatches = useMemo(
-    () => buildThreadFindMatches(timelineEntries, isThreadFindActive ? findState.query : ""),
-    [findState.query, isThreadFindActive, timelineEntries],
+    () =>
+      buildThreadFindMatches(
+        timelineEntries,
+        isThreadFindActive && !threadFindHistoryState ? findState.query : "",
+      ),
+    [findState.query, isThreadFindActive, threadFindHistoryState, timelineEntries],
   );
   const threadFindActiveIndex = clampThreadFindIndex(
     findState.activeIndex,
@@ -8192,6 +8202,8 @@ export default function ChatView(props: ChatViewProps) {
             findOpen={isThreadFindActive}
             findQuery={findState.query}
             findMatchCount={threadFindMatches.length}
+            findHistoryState={threadFindHistoryState}
+            onFindRetryHistory={openThreadFind}
             findActiveIndex={threadFindActiveIndex}
             findFocusRequestId={findState.focusRequestId}
             onFindQueryChange={changeThreadFindQuery}
