@@ -1644,7 +1644,7 @@ function OpenCommandPaletteDialog(props: {
     },
   });
 
-  if (activeThread || activeDraftThread) {
+  if (activeThread) {
     actionItems.push({
       kind: "action",
       value: "action:find-in-thread",

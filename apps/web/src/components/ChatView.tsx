@@ -286,7 +286,8 @@ import {
   formatElementContextLabel,
 } from "@t3tools/shared/elementContext";
 import { appendPreviewAnnotationPrompt } from "../lib/previewAnnotation";
-import { appendReviewCommentsToPrompt, type ReviewCommentContext } from "../reviewCommentContext";
+import { appendReviewCommentsToPrompt } from "../reviewCommentContext";
+import { type ReviewCommentContext } from "@t3tools/shared/reviewCommentText";
 import { environmentCatalog } from "../connection/catalog";
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { useKnownTerminalSessions, useThreadRunningTerminalIds } from "../state/terminalSessions";

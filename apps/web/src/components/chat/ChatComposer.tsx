@@ -886,7 +886,7 @@ import { searchProviderSkills } from "../../providerSkillSearch";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { serverEnvironment } from "../../state/server";
-import type { ReviewCommentContext } from "../../reviewCommentContext";
+import type { ReviewCommentContext } from "@t3tools/shared/reviewCommentText";
 
 const WORKSPACE_SNAPSHOT_RETRY_COOLDOWN_MS = 10_000;
 

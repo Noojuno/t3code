@@ -48,7 +48,7 @@ export interface ParsedTerminalContextEntry {
 export const INLINE_TERMINAL_CONTEXT_PLACEHOLDER = "\uFFFC";
 
 const TRAILING_TERMINAL_CONTEXT_BLOCK_PATTERN =
-  /\n*<terminal_context>\n((?:(?!<terminal_context>)[\s\S])*)\n<\/terminal_context>\s*$/;
+  /\n*<terminal_context>\n((?:(?!\n<\/terminal_context>)[\s\S])*)\n<\/terminal_context>\s*$/;
 
 export function normalizeTerminalContextText(text: string): string {
   return text.replace(/\r\n/g, "\n").replace(/^\n+|\n+$/g, "");

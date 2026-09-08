@@ -334,6 +334,10 @@
     "./threadSearch": {
       "types": "./src/threadSearch.ts",
       "import": "./src/threadSearch.ts"
+    },
+    "./reviewCommentText": {
+      "types": "./src/reviewCommentText.ts",
+      "import": "./src/reviewCommentText.ts"
     }
   },
   "scripts": {

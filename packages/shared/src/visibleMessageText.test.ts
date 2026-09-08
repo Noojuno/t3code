@@ -95,3 +95,22 @@ describe("deriveDisplayedUserMessageContent", () => {
     ]);
   });
 });
+
+it("keeps literal context tags inside serialized payloads and separates repeated suffixes", () => {
+  const terminal =
+    "<terminal_context>\n- Terminal 1 line 1:\n  1 | <terminal_context></terminal_context>\n</terminal_context>";
+  const element =
+    "<element_context>\n- <div>:\n  html: <element_context></element_context>\n</element_context>";
+  const preview =
+    "<preview_annotation>\nId: note\nPage: Example\nComment: Fix <preview_annotation></preview_annotation>\n</preview_annotation>";
+  const result = deriveDisplayedUserMessageContent(
+    ["Fix this", terminal, element, preview, terminal, element, preview].join("\n\n"),
+  );
+  expect(result.visibleText).toBe("Fix this");
+  expect(result.terminalContexts).toHaveLength(2);
+  expect(result.elementContexts).toHaveLength(2);
+  expect(result.previewAnnotations).toHaveLength(2);
+  expect(result.previewAnnotations[0]?.comment).toBe(
+    "Fix <preview_annotation></preview_annotation>",
+  );
+});

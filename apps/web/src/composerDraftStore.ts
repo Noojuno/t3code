@@ -59,7 +59,10 @@ import { useShallow } from "zustand/react/shallow";
 import { createDeferredStorage, createMemoryStorage } from "./lib/storage";
 import { getDefaultServerModel } from "./providerModels";
 import { UnifiedSettings } from "@t3tools/contracts/settings";
-import { ReviewCommentContextSchema, type ReviewCommentContext } from "./reviewCommentContext";
+import {
+  ReviewCommentContextSchema,
+  type ReviewCommentContext,
+} from "@t3tools/shared/reviewCommentText";
 const isRuntimeMode = Schema.is(RuntimeMode);
 const isProviderDriverKind = Schema.is(ProviderDriverKind);
 const isReviewCommentContext = Schema.is(ReviewCommentContextSchema);

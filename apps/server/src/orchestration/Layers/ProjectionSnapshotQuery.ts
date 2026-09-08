@@ -3398,14 +3398,24 @@ pending_approval_requests AS (
         ),
       );
 
+  // Unlike the detail subscription watermark, a search index must include lifecycle
+  // events: creating a previously deleted ID resets all of its projected messages.
+  const getThreadSearchSequence = SqlSchema.findOne({
+    Request: Schema.Struct({ threadId: ThreadId, maxSequence: Schema.Number }),
+    Result: Schema.Struct({ sequence: Schema.NullOr(Schema.Number) }),
+    execute: ({ threadId, maxSequence }) => sql`
+      SELECT MAX(sequence) AS sequence FROM orchestration_events
+      WHERE aggregate_kind = 'thread' AND stream_id = ${threadId}
+        AND sequence <= ${maxSequence}`,
+  });
   const searchThread = yield* makeThreadFindQuery(
     Effect.fn("ThreadFindQuery.sequence")(function* (threadId) {
       const { snapshotSequence } = yield* getSnapshotSequence();
-      const row = yield* getThreadEventWatermarkRow({
+      const row = yield* getThreadSearchSequence({
         threadId,
         maxSequence: snapshotSequence,
       }).pipe(Effect.mapError(toPersistenceSqlError("searchThread:sequence")));
-      return Option.isSome(row) ? (row.value.threadSequence ?? 0) : 0;
+      return row.sequence ?? 0;
     }),
   );
 

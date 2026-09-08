@@ -178,9 +178,11 @@ import { formatWorkspaceRelativePath } from "../../filePathDisplay";
 import {
   buildReviewCommentRenderablePatch,
   formatReviewCommentFence,
+} from "../../reviewCommentContext";
+import {
   parseReviewCommentMessageSegments,
   type ReviewCommentContext,
-} from "../../reviewCommentContext";
+} from "@t3tools/shared/reviewCommentText";
 
 // ---------------------------------------------------------------------------
 // Context — shared state consumed by every row component via Context.
@@ -2707,7 +2709,7 @@ function UserMessageReviewCommentCard({ comment }: { comment: ReviewCommentConte
 
   return (
     <div className="space-y-2 rounded-lg border border-border/70 bg-background/70 p-3">
-      <div className="space-y-1">
+      <div className="space-y-1" data-thread-find-ignore>
         <div className="text-message-foreground text-xs font-medium">
           {formatWorkspaceRelativePath(comment.filePath, ctx.workspaceRoot)}
         </div>
@@ -2720,36 +2722,38 @@ function UserMessageReviewCommentCard({ comment }: { comment: ReviewCommentConte
           <SkillInlineText text={comment.text} skills={ctx.skills} />
         </div>
       )}
-      {fenceLanguage !== "diff" && comment.diff.trim().length > 0 && (
-        <ChatMarkdown
-          text={formatReviewCommentFence(fenceLanguage, comment.diff)}
-          cwd={ctx.markdownCwd}
-          threadRef={ctx.threadRef ?? undefined}
-          skills={ctx.skills}
-          className="text-message-foreground"
-        />
-      )}
-      {renderablePatch?.kind === "files" && (
-        <DiffWorkerPoolProvider>
-          {renderablePatch.files.map((fileDiff) => (
-            <FileDiff
-              key={resolveFileDiffPath(fileDiff)}
-              fileDiff={fileDiff}
-              options={{
-                collapsed: false,
-                diffStyle: "unified",
-                theme: resolveDiffThemeName(ctx.resolvedTheme),
-                preferredHighlighter: PREFERRED_HIGHLIGHTER,
-              }}
-            />
-          ))}
-        </DiffWorkerPoolProvider>
-      )}
-      {renderablePatch?.kind === "raw" && (
-        <pre className="overflow-x-auto rounded-md bg-muted/40 p-2 text-xs">
-          {renderablePatch.text}
-        </pre>
-      )}
+      <div className="space-y-2 empty:hidden" data-thread-find-ignore>
+        {fenceLanguage !== "diff" && comment.diff.trim().length > 0 && (
+          <ChatMarkdown
+            text={formatReviewCommentFence(fenceLanguage, comment.diff)}
+            cwd={ctx.markdownCwd}
+            threadRef={ctx.threadRef ?? undefined}
+            skills={ctx.skills}
+            className="text-message-foreground"
+          />
+        )}
+        {renderablePatch?.kind === "files" && (
+          <DiffWorkerPoolProvider>
+            {renderablePatch.files.map((fileDiff) => (
+              <FileDiff
+                key={resolveFileDiffPath(fileDiff)}
+                fileDiff={fileDiff}
+                options={{
+                  collapsed: false,
+                  diffStyle: "unified",
+                  theme: resolveDiffThemeName(ctx.resolvedTheme),
+                  preferredHighlighter: PREFERRED_HIGHLIGHTER,
+                }}
+              />
+            ))}
+          </DiffWorkerPoolProvider>
+        )}
+        {renderablePatch?.kind === "raw" && (
+          <pre className="overflow-x-auto rounded-md bg-muted/40 p-2 text-xs">
+            {renderablePatch.text}
+          </pre>
+        )}
+      </div>
     </div>
   );
 }
