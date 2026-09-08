@@ -49,7 +49,7 @@ import {
   type TerminalContextDraft,
   migrateLegacyTerminalContextPlaceholders,
   normalizeTerminalContextText,
-} from "./lib/terminalContext";
+} from "~/lib/terminalContext";
 import {
   appendInlineContextReference,
   type ComposerContextReference,

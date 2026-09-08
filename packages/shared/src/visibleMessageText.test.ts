@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { deriveDisplayedUserMessageContent } from "./visibleMessageText";
+import { deriveDisplayedUserMessageContent } from "./visibleMessageText.ts";
 
 describe("deriveDisplayedUserMessageContent", () => {
   it("extracts context blocks before trailing preview annotations", () => {

@@ -1,6 +1,6 @@
-import { findThreadSearchOccurrences } from "@t3tools/client-runtime/state/thread-search";
+import { findThreadSearchOccurrences } from "@t3tools/shared/threadSearch";
 import { useEffect } from "react";
-import { THREAD_FIND_BLOCK_TAGS } from "./threadFindText";
+import { THREAD_FIND_BLOCK_TAGS } from "@t3tools/shared/threadFindText";
 
 const THREAD_FIND_HIGHLIGHT_NAME = "t3-thread-find";
 const THREAD_FIND_ACTIVE_HIGHLIGHT_NAME = "t3-thread-find-active";
@@ -12,25 +12,6 @@ interface ThreadFindRange {
   readonly rowId: string;
   readonly occurrence: number;
   readonly range: Range;
-}
-
-interface HighlightConstructor {
-  new (...ranges: Range[]): object;
-}
-
-interface HighlightRegistry {
-  set(name: string, value: object): void;
-  delete(name: string): void;
-}
-
-function resolveHighlightApi(): {
-  readonly registry: HighlightRegistry;
-  readonly Highlight: HighlightConstructor;
-} | null {
-  const css = globalThis.CSS as unknown as { highlights?: HighlightRegistry } | undefined;
-  const Highlight = (globalThis as { Highlight?: HighlightConstructor }).Highlight;
-  if (!css?.highlights || !Highlight) return null;
-  return { registry: css.highlights, Highlight };
 }
 
 /** Collects visible occurrences without modifying rendered markdown. */
@@ -97,14 +78,13 @@ export function useThreadFindHighlights(input: {
   const { container, query, activeRowId, activeOccurrence, onActiveRange } = input;
 
   useEffect(() => {
-    const api = resolveHighlightApi();
-    if (!api) {
+    if (typeof CSS === "undefined" || !CSS.highlights || typeof Highlight === "undefined") {
       onActiveRange(null);
       return;
     }
     const clearHighlights = () => {
-      api.registry.delete(THREAD_FIND_HIGHLIGHT_NAME);
-      api.registry.delete(THREAD_FIND_ACTIVE_HIGHLIGHT_NAME);
+      CSS.highlights.delete(THREAD_FIND_HIGHLIGHT_NAME);
+      CSS.highlights.delete(THREAD_FIND_ACTIVE_HIGHLIGHT_NAME);
     };
     if (!container || query.length === 0) {
       onActiveRange(null);
@@ -127,10 +107,10 @@ export function useThreadFindHighlights(input: {
         }
       }
       onActiveRange(active);
-      api.registry.set(THREAD_FIND_HIGHLIGHT_NAME, new api.Highlight(...inactive));
-      api.registry.set(
+      CSS.highlights.set(THREAD_FIND_HIGHLIGHT_NAME, new Highlight(...inactive));
+      CSS.highlights.set(
         THREAD_FIND_ACTIVE_HIGHLIGHT_NAME,
-        new api.Highlight(...(active ? [active] : [])),
+        new Highlight(...(active ? [active] : [])),
       );
     };
     repaint();

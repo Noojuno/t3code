@@ -1,5 +1,5 @@
 import { type ResolvedKeybindingsConfig } from "@t3tools/contracts";
-import { splitThreadSearchText } from "@t3tools/client-runtime/state/thread-search";
+import { splitThreadSearchText } from "@t3tools/shared/threadSearch";
 import { ChevronRightIcon } from "lucide-react";
 import { shortcutLabelForCommand } from "../keybindings";
 import {
