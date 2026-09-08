@@ -2165,6 +2165,19 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
         )
       `;
 
+      const withinThread = yield* snapshotQuery.searchThread({
+        threadId: ThreadId.make("thread-active"),
+        query: "interim needle",
+      });
+      assert.equal(withinThread.totalMatches, 1);
+      assert.equal(withinThread.match?.source, "message");
+      assert.equal(
+        (yield* snapshotQuery.searchThread({
+          threadId: ThreadId.make("thread-active"),
+          query: "system needle",
+        })).totalMatches,
+        0,
+      );
       const literalPercent = yield* snapshotQuery.searchThreads({ query: "100%" });
       assert.deepStrictEqual(
         literalPercent.matches.map((match) => [match.threadId, match.source]),
