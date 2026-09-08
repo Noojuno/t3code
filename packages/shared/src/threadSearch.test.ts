@@ -15,3 +15,9 @@ it("splits search text into highlighted and unhighlighted parts", () => {
     { text: "two", highlighted: true, start: 14 },
   ]);
 });
+
+it("matches both Greek sigma forms without changing source offsets", () => {
+  expect(findThreadSearchOccurrences("ΟΣ ος οσ", "Σ")).toEqual([1, 4, 7]);
+  expect(findThreadSearchOccurrences("ΟΣ ος οσ", "ς")).toEqual([1, 4, 7]);
+  expect(findThreadSearchOccurrences("İ ΟΣ", "Σ")).toEqual([3]);
+});

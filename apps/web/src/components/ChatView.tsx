@@ -329,7 +329,7 @@ import {
   useQueuedMessages,
   useQueuedMessageStore,
 } from "../queuedMessageStore";
-import { type ReviewCommentContext } from "../reviewCommentContext";
+import { type ReviewCommentContext } from "@t3tools/shared/reviewCommentText";
 import { environmentCatalog } from "../connection/catalog";
 import { isDesktopLocalConnectionTarget } from "../connection/desktopLocal";
 import { useEnvironmentDisconnectDelay } from "../hooks/useEnvironmentDisconnectDelay";

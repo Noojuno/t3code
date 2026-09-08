@@ -2,7 +2,7 @@ import type { PreviewAnnotationPayload } from "@t3tools/contracts";
 import { buildElementContextBlock, normalizeElementContextSelection } from "./elementContext.ts";
 
 const TRAILING_PREVIEW_ANNOTATION_BLOCK_PATTERN =
-  /\n*<preview_annotation>\n((?:(?!<preview_annotation>)[\s\S])*)\n<\/preview_annotation>\s*$/;
+  /\n*<preview_annotation>\n((?:(?!\n<\/preview_annotation>)[\s\S])*)\n<\/preview_annotation>\s*$/;
 
 export interface ParsedPreviewAnnotation {
   id: string;

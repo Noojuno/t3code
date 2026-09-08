@@ -1,3 +1,4 @@
+import { parseReviewCommentMessageSegments } from "./reviewCommentText.ts";
 import type { OrchestrationMessage } from "@t3tools/contracts";
 import { proposedPlanTitle, stripDisplayedPlanMarkdown } from "./proposedPlanText.ts";
 import { deriveDisplayedUserMessageContent } from "./visibleMessageText.ts";
@@ -104,6 +105,14 @@ export function searchableMessageSegments(
 ): readonly string[] | null {
   if (message.role === "user") {
     const { visibleText, terminalContexts } = deriveDisplayedUserMessageContent(message.text);
+    const review = parseReviewCommentMessageSegments(visibleText);
+    if (review.some((segment) => segment.kind === "review-comment")) {
+      return review.flatMap((segment) =>
+        segment.kind === "text"
+          ? markdownThreadFindText(segment.text.trim(), true)
+          : [segment.comment.text.replace(/\r?\n/g, " ")],
+      );
+    }
     const segments = splitUserMessageTerminalContexts(visibleText, terminalContexts);
     if (segments === null) return markdownThreadFindText(visibleText, true);
     return segments.flatMap((segment) =>

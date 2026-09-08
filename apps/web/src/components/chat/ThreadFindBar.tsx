@@ -54,6 +54,7 @@ export function ThreadFindBar(props: ThreadFindBarProps) {
     <InputGroup
       variant="popover"
       size="lg"
+      onContextMenu={(event) => event.stopPropagation()}
       role="search"
       aria-label="Find in thread"
       aria-busy={props.historyState === "loading"}

@@ -5,12 +5,12 @@ export interface ThreadSearchTextPart {
 }
 
 function foldThreadSearchCase(text: string): string {
-  const lowered = text.toLowerCase();
+  const lowered = text.toLowerCase().replace(/ς/g, "σ");
   if (lowered.length === text.length) return lowered;
 
   let folded = "";
   for (const character of text) {
-    const loweredCharacter = character.toLowerCase();
+    const loweredCharacter = character.toLowerCase().replace(/ς/g, "σ");
     folded += loweredCharacter.length === character.length ? loweredCharacter : character;
   }
   return folded;
