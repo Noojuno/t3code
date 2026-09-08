@@ -1,3 +1,4 @@
+import { useServerThreadFind } from "./chat/useServerThreadFind";
 import { useThreadFindHistory } from "./chat/useThreadFindHistory";
 import { useLoadBalancedEnvironment } from "../hooks/useLoadBalancedEnvironment";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
@@ -129,6 +130,7 @@ import {
 import {
   createMessageAttachmentPreviewProjector,
   derivePhase,
+  deriveTimelineEntries,
   deriveTimelineEntriesWithState,
   deriveActiveWorkStartedAt,
   deriveActivePlanState,
@@ -6681,34 +6683,69 @@ export default function ChatView(props: ChatViewProps) {
     setFindState((state) => ({ ...state, query, activeIndex: 0 }));
   }, []);
   const isThreadFindActive = activeThreadKey !== null && findState.threadKey === activeThreadKey;
-  const threadFindHistoryState = useThreadFindHistory(
-    isThreadFindActive && findState.query.trim()
+  const useServerFind = isServerThread && serverConfig?.threadFind === true;
+  const serverFind = useServerThreadFind(
+    useServerFind && isThreadFindActive ? activeThreadRef : null,
+    findState.query,
+    findState.activeIndex,
+    activeThread?.messages,
+    activeThread?.proposedPlans,
+  );
+  const serverFindEntries = useMemo(
+    () =>
+      serverFind.data?.match
+        ? deriveTimelineEntries(serverFind.data.messages, serverFind.data.proposedPlans, [])
+        : null,
+    [serverFind.data],
+  );
+  const localFindHistoryState = useThreadFindHistory(
+    !useServerFind && isThreadFindActive && findState.query.trim()
       ? `${activeThreadKey}:${findState.focusRequestId}`
       : null,
     loadEarlierTurns,
   );
+  const threadFindHistoryState = useServerFind
+    ? serverFind.error
+      ? "error"
+      : serverFind.isPending
+        ? "loading"
+        : null
+    : localFindHistoryState;
   const threadFindMatches = useMemo(
     () =>
       buildThreadFindMatches(
         timelineEntries,
-        isThreadFindActive && threadFindHistoryState !== "loading" ? findState.query : "",
+        !useServerFind && isThreadFindActive && threadFindHistoryState !== "loading"
+          ? findState.query
+          : "",
       ),
-    [findState.query, isThreadFindActive, threadFindHistoryState, timelineEntries],
+    [findState.query, isThreadFindActive, useServerFind, threadFindHistoryState, timelineEntries],
   );
-  const threadFindActiveIndex = clampThreadFindIndex(
-    findState.activeIndex,
-    threadFindMatches.length,
-  );
-  const activeThreadFindMatch = threadFindMatches[threadFindActiveIndex] ?? null;
+  const threadFindCount = useServerFind
+    ? (serverFind.data?.totalMatches ?? 0)
+    : threadFindMatches.length;
+  const threadFindActiveIndex = useServerFind
+    ? (serverFind.data?.activeIndex ?? 0)
+    : clampThreadFindIndex(findState.activeIndex, threadFindCount);
+  const activeThreadFindMatch = useServerFind
+    ? serverFind.data?.match
+      ? {
+          entryId: serverFind.data.match.sourceId,
+          turnId: serverFind.data.match.turnId,
+          occurrence: serverFind.data.match.occurrence,
+        }
+      : null
+    : (threadFindMatches[threadFindActiveIndex] ?? null);
+  const retryThreadFind = useServerFind ? serverFind.refresh : openThreadFind;
   const stepThreadFind = useCallback(
     (delta: number) => {
       setFindState((state) => ({
         ...state,
-        activeIndex: stepThreadFindIndex(state.activeIndex, threadFindMatches.length, delta),
+        activeIndex: stepThreadFindIndex(state.activeIndex, threadFindCount, delta),
         navigationId: state.navigationId + 1,
       }));
     },
-    [threadFindMatches.length],
+    [threadFindCount],
   );
   const findNextThreadMatch = useCallback(() => stepThreadFind(1), [stepThreadFind]);
   const findPreviousThreadMatch = useCallback(() => stepThreadFind(-1), [stepThreadFind]);
@@ -6718,9 +6755,9 @@ export default function ChatView(props: ChatViewProps) {
       <ThreadFindBar
         open={isThreadFindActive}
         query={findState.query}
-        matchCount={threadFindMatches.length}
+        matchCount={threadFindCount}
         historyState={threadFindHistoryState}
-        onRetryHistory={openThreadFind}
+        onRetryHistory={retryThreadFind}
         activeIndex={threadFindActiveIndex}
         focusRequestId={findState.focusRequestId}
         onQueryChange={changeThreadFindQuery}
@@ -6732,9 +6769,9 @@ export default function ChatView(props: ChatViewProps) {
     [
       isThreadFindActive,
       findState.query,
-      threadFindMatches.length,
+      threadFindCount,
       threadFindHistoryState,
-      openThreadFind,
+      retryThreadFind,
       threadFindActiveIndex,
       findState.focusRequestId,
       changeThreadFindQuery,
@@ -10010,6 +10047,8 @@ export default function ChatView(props: ChatViewProps) {
                   paintOnlyDisplayedTimeline ? noopHeldRevert : onRevertTimelineTurn
                 }
                 isRevertingCheckpoint={!paintOnlyDisplayedTimeline && isRevertingCheckpoint}
+                searchEntries={serverFindEntries}
+                onCloseSearch={closeThreadFind}
                 onImageExpand={onExpandTimelineImage}
                 onFileOpen={paintOnlyDisplayedTimeline ? noopHeldAttachment : openFileAttachment}
                 onFileDownload={
@@ -10052,13 +10091,17 @@ export default function ChatView(props: ChatViewProps) {
                   { context: { terminalFocus: false } },
                 )}
                 onRemoveQueuedMessage={onRemoveQueuedMessage}
-                findQuery={isThreadFindActive ? findState.query : ""}
+                findQuery={
+                  isThreadFindActive && (!useServerFind || serverFindEntries !== null)
+                    ? findState.query
+                    : ""
+                }
                 activeFindMatch={activeThreadFindMatch}
                 findNavigationId={findState.navigationId}
               />
 
               {/* scroll to end pill — shown when user has scrolled away from the live edge */}
-              {showScrollToBottom && (
+              {showScrollToBottom && serverFindEntries === null && (
                 <div
                   className="pointer-events-none absolute left-1/2 z-30 flex -translate-x-1/2 justify-center py-1.5"
                   style={{ bottom: scrollToEndClearance + 4 }}

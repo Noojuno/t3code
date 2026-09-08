@@ -1,10 +1,7 @@
 import type { TurnId } from "@t3tools/contracts";
 import { findThreadSearchOccurrences } from "@t3tools/client-runtime/state/thread-search";
 import type { TimelineEntry } from "../../session-logic";
-import { proposedPlanTitle, stripDisplayedPlanMarkdown } from "../../proposedPlan";
-import { deriveDisplayedUserMessageContent } from "~/lib/visibleMessageText";
-import { splitUserMessageTerminalContexts } from "./userMessageTerminalContexts";
-import { markdownThreadFindText } from "./threadFindText";
+import { searchableMessageSegments, searchablePlanSegments } from "@t3tools/shared/threadFindText";
 
 /** One occurrence of the query inside a searchable timeline entry. */
 export interface ThreadFindMatch {
@@ -33,26 +30,9 @@ function searchableThreadEntrySegments(entry: TimelineEntry): readonly string[] 
 }
 
 function deriveThreadEntrySegments(entry: TimelineEntry): readonly string[] | null {
-  if (entry.kind === "proposed-plan") {
-    const markdown = entry.proposedPlan.planMarkdown;
-    return [
-      proposedPlanTitle(markdown) ?? "Proposed plan",
-      ...markdownThreadFindText(stripDisplayedPlanMarkdown(markdown)),
-    ];
-  }
-  if (entry.kind !== "message") return null;
-  if (entry.message.role === "user") {
-    const { visibleText, terminalContexts } = deriveDisplayedUserMessageContent(entry.message.text);
-    const segments = splitUserMessageTerminalContexts(visibleText, terminalContexts);
-    if (segments === null) return markdownThreadFindText(visibleText, true);
-    return segments.flatMap((segment) =>
-      segment.kind === "text" ? markdownThreadFindText(segment.text, true) : [],
-    );
-  }
-  if (entry.message.role !== "assistant") return null;
-  return markdownThreadFindText(
-    entry.message.text || (entry.message.streaming ? "" : "(empty response)"),
-  );
+  if (entry.kind === "proposed-plan")
+    return searchablePlanSegments(entry.proposedPlan.planMarkdown);
+  return entry.kind === "message" ? searchableMessageSegments(entry.message) : null;
 }
 
 /** Conversation text only: source-only Markdown and generated controls are excluded. */

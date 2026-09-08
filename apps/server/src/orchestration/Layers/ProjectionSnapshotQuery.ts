@@ -80,6 +80,8 @@ import {
   type ProjectionSnapshotQueryShape,
 } from "../Services/ProjectionSnapshotQuery.ts";
 
+import { makeThreadFindQuery } from "./ThreadFindQuery.ts";
+
 const decodeReadModel = Schema.decodeUnknownEffect(OrchestrationReadModel);
 const decodeShellSnapshot = Schema.decodeUnknownEffect(OrchestrationShellSnapshot);
 const decodeThread = Schema.decodeUnknownEffect(OrchestrationThread);
@@ -3757,6 +3759,17 @@ pending_approval_requests AS (
         ),
       );
 
+  const searchThread = yield* makeThreadFindQuery(
+    Effect.fn("ThreadFindQuery.sequence")(function* (threadId) {
+      const { snapshotSequence } = yield* getSnapshotSequence();
+      const row = yield* getThreadEventWatermarkRow({
+        threadId,
+        maxSequence: snapshotSequence,
+      }).pipe(Effect.mapError(toPersistenceSqlError("searchThread:sequence")));
+      return Option.isSome(row) ? (row.value.threadSequence ?? 0) : 0;
+    }),
+  );
+
   return {
     getCommandReadModel,
     getUserInputActivity,
@@ -3766,6 +3779,7 @@ pending_approval_requests AS (
     getArchivedShellSnapshot,
     getDeletedWorktreeThreads,
     searchThreads,
+    searchThread,
     getSnapshotSequence,
     getCounts,
     getEventReplayStats,

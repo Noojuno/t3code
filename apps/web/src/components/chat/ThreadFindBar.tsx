@@ -9,7 +9,7 @@ interface ThreadFindBarProps {
   readonly open: boolean;
   readonly query: string;
   readonly matchCount: number;
-  readonly historyState: "loading" | "incomplete" | null;
+  readonly historyState: "loading" | "incomplete" | "error" | null;
   readonly onRetryHistory: () => void;
   readonly activeIndex: number;
   readonly focusRequestId: number;
@@ -58,6 +58,7 @@ export function ThreadFindBar(props: ThreadFindBarProps) {
         value={props.query}
         aria-label="Find in thread"
         placeholder="Find in thread"
+        maxLength={200}
         spellCheck={false}
         autoComplete="off"
         onChange={(event) => props.onQueryChange(event.target.value)}
@@ -73,20 +74,22 @@ export function ThreadFindBar(props: ThreadFindBarProps) {
         >
           {props.historyState === "loading"
             ? "Searching…"
-            : hasQuery
-              ? `${formatThreadFindCount(props.activeIndex, props.matchCount)}${props.historyState === "incomplete" ? " (partial)" : ""}`
-              : ""}
+            : props.historyState === "error"
+              ? "Search failed"
+              : hasQuery
+                ? `${formatThreadFindCount(props.activeIndex, props.matchCount)}${props.historyState === "incomplete" ? " (partial)" : ""}`
+                : ""}
         </span>
-        {props.historyState === "incomplete" ? (
+        {props.historyState === "incomplete" || props.historyState === "error" ? (
           <Button size="xs" variant="ghost" onClick={props.onRetryHistory}>
-            Search older
+            Retry
           </Button>
         ) : null}
         <Button
           size="icon-xs"
           variant="ghost"
           aria-label="Previous match"
-          disabled={props.matchCount === 0}
+          disabled={props.matchCount === 0 || props.historyState === "loading"}
           onClick={props.onPrevious}
         >
           <ChevronUpIcon />
@@ -95,7 +98,7 @@ export function ThreadFindBar(props: ThreadFindBarProps) {
           size="icon-xs"
           variant="ghost"
           aria-label="Next match"
-          disabled={props.matchCount === 0}
+          disabled={props.matchCount === 0 || props.historyState === "loading"}
           onClick={props.onNext}
         >
           <ChevronDownIcon />
