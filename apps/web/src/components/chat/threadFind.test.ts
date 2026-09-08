@@ -89,7 +89,82 @@ describe("searchableThreadEntryText", () => {
       "</terminal_context>",
     ].join("\n");
 
-    expect(searchableThreadEntryText(messageEntry("m1", "user", prompt))).toBe("check ");
+    expect(searchableThreadEntryText(messageEntry("m1", "user", prompt))).toBe("check");
+  });
+
+  it("keeps repeated terminal labels that are still visible after the chip", () => {
+    const prompt =
+      "check @terminal-1:12 and @terminal-1:12\n\n<terminal_context>\n- Terminal 1 line 12:\n  12 | output\n</terminal_context>";
+    expect(
+      buildThreadFindMatches([messageEntry("m1", "user", prompt)], "@terminal-1:12"),
+    ).toHaveLength(1);
+  });
+
+  it("keeps the original text when terminal labels are out of context order", () => {
+    const prompt =
+      "@terminal-2:12 then @terminal-1:12\n\n<terminal_context>\n- Terminal 1 line 12:\n  12 | first\n- Terminal 2 line 12:\n  12 | second\n</terminal_context>";
+    expect(buildThreadFindMatches([messageEntry("m1", "user", prompt)], "@terminal-")).toHaveLength(
+      2,
+    );
+  });
+
+  it.each(["user", "assistant"] as const)(
+    "searches rendered %s Markdown, not link destinations or formatting",
+    (role) => {
+      const entries = [
+        messageEntry(
+          "m1",
+          role,
+          "[documentation](https://hidden.example/path) foo**bar** and `inline code`",
+        ),
+      ];
+      expect(buildThreadFindMatches(entries, "hidden.example")).toHaveLength(0);
+      expect(buildThreadFindMatches(entries, "documentation")).toHaveLength(1);
+      expect(buildThreadFindMatches(entries, "foobar")).toHaveLength(1);
+      expect(buildThreadFindMatches(entries, "inline code")).toHaveLength(1);
+    },
+  );
+
+  it("searches code, escaped punctuation, entities and sanitized HTML as displayed", () => {
+    const entries = [
+      messageEntry(
+        "m1",
+        "assistant",
+        "```ts\nconst value = 1;\n```\n\n\\*literal\\* &amp; <strong>bold</strong><script>hidden</script>",
+      ),
+    ];
+    for (const query of ["const value", "*literal* & bold"]) {
+      expect(buildThreadFindMatches(entries, query)).toHaveLength(1);
+    }
+    for (const query of ["hidden", "strong", "```ts"]) {
+      expect(buildThreadFindMatches(entries, query)).toHaveLength(0);
+    }
+  });
+
+  it("preserves literal HTML in user messages", () => {
+    expect(
+      buildThreadFindMatches([messageEntry("m1", "user", "<strong>bold</strong>")], "<strong>"),
+    ).toHaveLength(1);
+  });
+
+  it("searches plan titles before body matches, including the default title", () => {
+    const entries = [proposedPlanEntry("p1", "# Release\n\n## Summary\n\nRelease **ready**", null)];
+    expect(buildThreadFindMatches(entries, "Release").map((match) => match.occurrence)).toEqual([
+      0, 1,
+    ]);
+    expect(buildThreadFindMatches(entries, "Summary")).toHaveLength(0);
+    expect(
+      buildThreadFindMatches([proposedPlanEntry("p2", "Body", null)], "Proposed plan"),
+    ).toHaveLength(1);
+  });
+
+  it("does not join separate blocks or the plan title and body into a phrase", () => {
+    expect(
+      buildThreadFindMatches([messageEntry("m1", "assistant", "first\n\nsecond")], "firstsecond"),
+    ).toHaveLength(0);
+    expect(
+      buildThreadFindMatches([proposedPlanEntry("p1", "# first\n\nsecond", null)], "firstsecond"),
+    ).toHaveLength(0);
   });
 
   it("indexes the rendered placeholder for empty assistant responses", () => {
@@ -101,12 +176,12 @@ describe("searchableThreadEntryText", () => {
     expect(searchableThreadEntryText(messageEntry("s1", "system", "sentinel"))).toBeNull();
   });
 
-  it("uses the displayed proposed-plan body", () => {
+  it("uses the displayed proposed-plan title and body", () => {
     expect(
       searchableThreadEntryText(
-        proposedPlanEntry("p1", "# Hidden title\n\n## Summary\n\nship it", null),
+        proposedPlanEntry("p1", "# Visible title\n\n## Summary\n\nship it", null),
       ),
-    ).toBe("ship it");
+    ).toBe("Visible title\nship it");
   });
 });
 
