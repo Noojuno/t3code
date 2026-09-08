@@ -70,6 +70,8 @@ interface ChatHeaderProps {
   findOpen: boolean;
   findQuery: string;
   findMatchCount: number;
+  findHistoryState: "loading" | "incomplete" | null;
+  onFindRetryHistory: () => void;
   findActiveIndex: number;
   findFocusRequestId: number;
   onFindQueryChange: (query: string) => void;
@@ -152,6 +154,8 @@ export const ChatHeader = memo(function ChatHeader({
   findOpen,
   findQuery,
   findMatchCount,
+  findHistoryState,
+  onFindRetryHistory,
   findActiveIndex,
   findFocusRequestId,
   onFindQueryChange,
@@ -461,6 +465,8 @@ export const ChatHeader = memo(function ChatHeader({
         open={findOpen}
         query={findQuery}
         matchCount={findMatchCount}
+        historyState={findHistoryState}
+        onRetryHistory={onFindRetryHistory}
         activeIndex={findActiveIndex}
         focusRequestId={findFocusRequestId}
         onQueryChange={onFindQueryChange}
