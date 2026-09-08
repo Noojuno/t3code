@@ -326,6 +326,7 @@ import type { AssistantCitationRequest } from "./chat/AssistantCitationSource";
 import { resolveTimelineIsAtEnd } from "./chat/MessagesTimeline.logic";
 import { resolveComposerTimelineInset, resolveScrollToEndClearance } from "./composerFooterLayout";
 import { ChatHeader } from "./chat/ChatHeader";
+import { ThreadFindBar } from "./chat/ThreadFindBar";
 import { PanelLayoutControls, RightPanelMaximizeControl } from "./chat/PanelLayoutControls";
 import {
   buildThreadFindMatches,
@@ -6107,6 +6108,37 @@ export default function ChatView(props: ChatViewProps) {
   const findNextThreadMatch = useCallback(() => stepThreadFind(1), [stepThreadFind]);
   const findPreviousThreadMatch = useCallback(() => stepThreadFind(-1), [stepThreadFind]);
 
+  const threadFindBar = useMemo(
+    () => (
+      <ThreadFindBar
+        open={isThreadFindActive}
+        query={findState.query}
+        matchCount={threadFindMatches.length}
+        historyState={threadFindHistoryState}
+        onRetryHistory={openThreadFind}
+        activeIndex={threadFindActiveIndex}
+        focusRequestId={findState.focusRequestId}
+        onQueryChange={changeThreadFindQuery}
+        onNext={findNextThreadMatch}
+        onPrevious={findPreviousThreadMatch}
+        onClose={closeThreadFind}
+      />
+    ),
+    [
+      isThreadFindActive,
+      findState.query,
+      threadFindMatches.length,
+      threadFindHistoryState,
+      openThreadFind,
+      threadFindActiveIndex,
+      findState.focusRequestId,
+      changeThreadFindQuery,
+      findNextThreadMatch,
+      findPreviousThreadMatch,
+      closeThreadFind,
+    ],
+  );
+
   useEffect(() => subscribeThreadFindOpen(openThreadFind), [openThreadFind]);
 
   useEffect(() => {
@@ -8200,17 +8232,7 @@ export default function ChatView(props: ChatViewProps) {
             onAddProjectScript={saveProjectScript}
             onUpdateProjectScript={updateProjectScript}
             onDeleteProjectScript={deleteProjectScript}
-            findOpen={isThreadFindActive}
-            findQuery={findState.query}
-            findMatchCount={threadFindMatches.length}
-            findHistoryState={threadFindHistoryState}
-            onFindRetryHistory={openThreadFind}
-            findActiveIndex={threadFindActiveIndex}
-            findFocusRequestId={findState.focusRequestId}
-            onFindQueryChange={changeThreadFindQuery}
-            onFindNext={findNextThreadMatch}
-            onFindPrevious={findPreviousThreadMatch}
-            onCloseFind={closeThreadFind}
+            findBar={threadFindBar}
           />
         </WorkspacePageHeader>
 

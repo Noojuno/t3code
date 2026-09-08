@@ -18,6 +18,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
 } from "react";
@@ -46,7 +47,6 @@ import {
   WorkspaceBreadcrumbSeparator,
 } from "../WorkspaceBreadcrumb";
 import { cn } from "~/lib/utils";
-import { ThreadFindBar } from "./ThreadFindBar";
 
 interface ChatHeaderProps {
   activeThreadEnvironmentId: EnvironmentId;
@@ -69,17 +69,7 @@ interface ChatHeaderProps {
   readonly onOpenPullRequest?: ((number: number) => void) | undefined;
   onNewThreadInProject: () => void;
   onOpenProjectSettings?: (() => void) | undefined;
-  findOpen: boolean;
-  findQuery: string;
-  findMatchCount: number;
-  findHistoryState: "loading" | "incomplete" | null;
-  onFindRetryHistory: () => void;
-  findActiveIndex: number;
-  findFocusRequestId: number;
-  onFindQueryChange: (query: string) => void;
-  onFindNext: () => void;
-  onFindPrevious: () => void;
-  onCloseFind: () => void;
+  findBar: ReactNode;
   onRunProjectScript: (script: ProjectScript) => void;
   onAddProjectScript: (input: NewProjectScriptInput) => Promise<ProjectScriptActionResult>;
   onUpdateProjectScript: (
@@ -156,17 +146,7 @@ export const ChatHeader = memo(function ChatHeader({
   onAddProjectScript,
   onUpdateProjectScript,
   onDeleteProjectScript,
-  findOpen,
-  findQuery,
-  findMatchCount,
-  findHistoryState,
-  onFindRetryHistory,
-  findActiveIndex,
-  findFocusRequestId,
-  onFindQueryChange,
-  onFindNext,
-  onFindPrevious,
-  onCloseFind,
+  findBar,
 }: ChatHeaderProps) {
   const { active: panelAnimationsActive, durationMs: panelAnimationDurationMs } =
     usePanelAnimationSettings();
@@ -471,19 +451,7 @@ export const ChatHeader = memo(function ChatHeader({
           />
         )}
       </div>
-      <ThreadFindBar
-        open={findOpen}
-        query={findQuery}
-        matchCount={findMatchCount}
-        historyState={findHistoryState}
-        onRetryHistory={onFindRetryHistory}
-        activeIndex={findActiveIndex}
-        focusRequestId={findFocusRequestId}
-        onQueryChange={onFindQueryChange}
-        onNext={onFindNext}
-        onPrevious={onFindPrevious}
-        onClose={onCloseFind}
-      />
+      {findBar}
     </div>
   );
 });
