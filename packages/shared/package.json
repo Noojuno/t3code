@@ -291,13 +291,13 @@
       "types": "./src/codexMarkdownDirectives.ts",
       "import": "./src/codexMarkdownDirectives.ts"
     },
-    "./markdown-github-alerts": {
-      "types": "./src/markdown-github-alerts.ts",
-      "import": "./src/markdown-github-alerts.ts"
+    "./markdownGithubAlerts": {
+      "types": "./src/markdownGithubAlerts.ts",
+      "import": "./src/markdownGithubAlerts.ts"
     },
-    "./markdown-list-indentation": {
-      "types": "./src/markdown-list-indentation.ts",
-      "import": "./src/markdown-list-indentation.ts"
+    "./markdownListIndentation": {
+      "types": "./src/markdownListIndentation.ts",
+      "import": "./src/markdownListIndentation.ts"
     },
     "./elementContext": {
       "types": "./src/elementContext.ts",

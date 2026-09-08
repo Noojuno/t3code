@@ -32,6 +32,14 @@ export function ThreadFindBar(props: ThreadFindBarProps) {
 
   const hasQuery = props.query.trim().length > 0;
   const noResults = hasQuery && !props.historyState && props.matchCount === 0;
+  let label = "";
+  if (hasQuery) {
+    label = formatThreadFindCount(props.activeIndex, props.matchCount);
+    if (props.historyState === "incomplete") label += " (partial)";
+  }
+  if (props.historyState === "loading") label = "Searching…";
+  if (props.historyState === "error") label = "Search failed";
+  const navigationDisabled = props.matchCount === 0 || props.historyState === "loading";
   const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
     if (event.key === "Enter") {
@@ -72,13 +80,7 @@ export function ThreadFindBar(props: ThreadFindBarProps) {
             noResults ? "text-destructive" : "text-muted-foreground",
           )}
         >
-          {props.historyState === "loading"
-            ? "Searching…"
-            : props.historyState === "error"
-              ? "Search failed"
-              : hasQuery
-                ? `${formatThreadFindCount(props.activeIndex, props.matchCount)}${props.historyState === "incomplete" ? " (partial)" : ""}`
-                : ""}
+          {label}
         </span>
         {props.historyState === "incomplete" || props.historyState === "error" ? (
           <Button size="xs" variant="ghost" onClick={props.onRetryHistory}>
@@ -89,7 +91,7 @@ export function ThreadFindBar(props: ThreadFindBarProps) {
           size="icon-xs"
           variant="ghost"
           aria-label="Previous match"
-          disabled={props.matchCount === 0 || props.historyState === "loading"}
+          disabled={navigationDisabled}
           onClick={props.onPrevious}
         >
           <ChevronUpIcon />
@@ -98,7 +100,7 @@ export function ThreadFindBar(props: ThreadFindBarProps) {
           size="icon-xs"
           variant="ghost"
           aria-label="Next match"
-          disabled={props.matchCount === 0 || props.historyState === "loading"}
+          disabled={navigationDisabled}
           onClick={props.onNext}
         >
           <ChevronDownIcon />

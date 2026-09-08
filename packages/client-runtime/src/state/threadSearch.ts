@@ -17,12 +17,6 @@ export interface ThreadSearchResultsState {
   readonly isLoading: boolean;
 }
 
-export {
-  findThreadSearchOccurrences,
-  splitThreadSearchText,
-  type ThreadSearchTextPart,
-} from "@t3tools/shared/threadSearch";
-
 const ThreadSearchKey = Schema.fromJsonString(
   Schema.Tuple([Schema.Array(EnvironmentId), OrchestrationSearchThreadsInput.fields.query]),
 );

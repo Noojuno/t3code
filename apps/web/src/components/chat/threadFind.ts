@@ -1,5 +1,5 @@
 import type { TurnId } from "@t3tools/contracts";
-import { findThreadSearchOccurrences } from "@t3tools/client-runtime/state/thread-search";
+import { countThreadSearchOccurrences } from "@t3tools/shared/threadSearch";
 import type { TimelineEntry } from "../../session-logic";
 import { searchableMessageSegments, searchablePlanSegments } from "@t3tools/shared/threadFindText";
 
@@ -17,22 +17,17 @@ export interface ThreadFindMatch {
 const entryTextCache = new WeakMap<object, readonly string[] | null>();
 
 function searchableThreadEntrySegments(entry: TimelineEntry): readonly string[] | null {
-  const key =
-    entry.kind === "message"
-      ? entry.message
-      : entry.kind === "proposed-plan"
-        ? entry.proposedPlan
-        : entry;
-  if (entryTextCache.has(key)) return entryTextCache.get(key)!;
-  const segments = deriveThreadEntrySegments(entry);
-  entryTextCache.set(key, segments);
+  if (entry.kind !== "message" && entry.kind !== "proposed-plan") return null;
+  const key = entry.kind === "message" ? entry.message : entry.proposedPlan;
+  let segments = entryTextCache.get(key);
+  if (segments === undefined) {
+    segments =
+      entry.kind === "message"
+        ? searchableMessageSegments(entry.message)
+        : searchablePlanSegments(entry.proposedPlan.planMarkdown);
+    entryTextCache.set(key, segments);
+  }
   return segments;
-}
-
-function deriveThreadEntrySegments(entry: TimelineEntry): readonly string[] | null {
-  if (entry.kind === "proposed-plan")
-    return searchablePlanSegments(entry.proposedPlan.planMarkdown);
-  return entry.kind === "message" ? searchableMessageSegments(entry.message) : null;
 }
 
 /** Conversation text only: source-only Markdown and generated controls are excluded. */
@@ -59,7 +54,7 @@ export function buildThreadFindMatches(
     if (segments === null) continue;
 
     const total = segments.reduce(
-      (count, text) => count + findThreadSearchOccurrences(text, normalizedQuery).length,
+      (count, text) => count + countThreadSearchOccurrences(text, normalizedQuery),
       0,
     );
     for (let occurrence = 0; occurrence < total; occurrence += 1) {

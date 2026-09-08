@@ -46,13 +46,13 @@ import {
   type TerminalContextDraft,
   ensureInlineTerminalContextPlaceholders,
   normalizeTerminalContextText,
-} from "./lib/terminalContext";
+} from "@t3tools/shared/terminalContext";
 import {
   type ElementContextDraft,
   type ElementContextSelection,
   elementContextDedupKey,
   newElementContextId,
-} from "./lib/elementContext";
+} from "@t3tools/shared/elementContext";
 import { create } from "zustand";
 import { persist, type PersistStorage, type StorageValue } from "zustand/middleware";
 import { useShallow } from "zustand/react/shallow";

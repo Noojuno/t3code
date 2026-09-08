@@ -8,7 +8,7 @@ import {
   type TurnId,
 } from "@t3tools/contracts";
 import { parseScopedThreadKey } from "@t3tools/client-runtime/environment";
-import type { CodexArtifactTemplate } from "@t3tools/client-runtime/codex-artifact-templates";
+import type { CodexArtifactTemplate } from "@t3tools/shared/codexArtifactTemplates";
 import {
   resolveWorkEntryToolPresentation,
   resolveViewedImageAsset,
@@ -160,10 +160,10 @@ import { type ThreadFindMatch } from "./threadFind";
 import { useThreadFindHighlights } from "./threadFindHighlights";
 import { TerminalContextInlineChip } from "./TerminalContextInlineChip";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { type ParsedTerminalContextEntry } from "~/lib/terminalContext";
-import { type ParsedElementContextEntry } from "~/lib/elementContext";
+import { type ParsedTerminalContextEntry } from "@t3tools/shared/terminalContext";
+import { type ParsedElementContextEntry } from "@t3tools/shared/elementContext";
 import { type ParsedPreviewAnnotation } from "~/lib/previewAnnotation";
-import { deriveDisplayedUserMessageContent } from "~/lib/visibleMessageText";
+import { deriveDisplayedUserMessageContent } from "@t3tools/shared/visibleMessageText";
 import { cn } from "~/lib/utils";
 import { useUiStateStore } from "~/uiStateStore";
 import { type TimestampFormat } from "@t3tools/contracts/settings";
@@ -171,7 +171,7 @@ import { formatChatTimestampTooltip, formatDayAwareTimestamp } from "../../times
 import {
   buildInlineTerminalContextText,
   splitUserMessageTerminalContexts,
-} from "./userMessageTerminalContexts";
+} from "@t3tools/shared/userMessageTerminalContexts";
 import { deriveAgentSpawnSummary } from "./agentSpawnSummary";
 import { SkillInlineText } from "./SkillInlineText";
 import { formatWorkspaceRelativePath } from "../../filePathDisplay";

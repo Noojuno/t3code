@@ -1,7 +1,5 @@
-import {
-  splitThreadSearchText,
-  type EnvironmentThreadSearchMatch,
-} from "@t3tools/client-runtime/state/thread-search";
+import { splitThreadSearchText } from "@t3tools/shared/threadSearch";
+import { type EnvironmentThreadSearchMatch } from "@t3tools/client-runtime/state/thread-search";
 
 import { AppText as Text } from "../../components/AppText";
 import { cn } from "../../lib/cn";

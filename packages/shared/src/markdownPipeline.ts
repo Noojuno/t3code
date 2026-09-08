@@ -3,8 +3,8 @@ import rehypeRaw from "rehype-raw";
 import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
-import { remarkGithubAlerts } from "./markdown-github-alerts.ts";
-import { remarkNormalizeListItemIndentation } from "./markdown-list-indentation.ts";
+import { remarkGithubAlerts } from "./markdownGithubAlerts.ts";
+import { remarkNormalizeListItemIndentation } from "./markdownListIndentation.ts";
 import {
   CODEX_ARTIFACT_TEMPLATE_HAST_PROPERTIES,
   remarkCodexDirectives,
