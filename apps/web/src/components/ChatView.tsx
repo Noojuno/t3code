@@ -6766,6 +6766,14 @@ export default function ChatView(props: ChatViewProps) {
       if (event.defaultPrevented && terminalFocusOwner === null) {
         return;
       }
+      // Dismiss find before resolving Escape's global thread.stop binding.
+      if (isThreadFindActive && event.key === "Escape") {
+        if (event.isComposing || event.keyCode === 229) return;
+        event.preventDefault();
+        event.stopPropagation();
+        closeThreadFind();
+        return;
+      }
       const shortcutContext = getShortcutContext();
 
       if (
@@ -7033,6 +7041,9 @@ export default function ChatView(props: ChatViewProps) {
     copyActiveThreadReference,
     getShortcutContext,
     openThreadFind,
+    closeThreadFind,
+    isThreadFindActive,
+    previewPanelOpen,
     toggleRightPanel,
     toggleRightPanelMaximized,
     toggleTerminalVisibility,

@@ -25,22 +25,30 @@ export interface DisplayedUserMessageContent {
  */
 export function deriveDisplayedUserMessageContent(text: string): DisplayedUserMessageContent {
   const previewAnnotations: ParsedPreviewAnnotation[] = [];
+  const terminalContexts: ParsedTerminalContextEntry[] = [];
+  const elementContexts: ParsedElementContextEntry[] = [];
   let visibleText = text;
 
+  // Peel the outermost suffix first: annotations can contain their own element context.
   while (true) {
     const extracted = extractTrailingPreviewAnnotation(visibleText);
-    if (!extracted.annotation) break;
-    previewAnnotations.unshift(extracted.annotation);
-    visibleText = extracted.promptText;
+    if (extracted.annotation) {
+      previewAnnotations.unshift(extracted.annotation);
+      visibleText = extracted.promptText;
+      continue;
+    }
+    const displayed = deriveDisplayedUserMessageState(visibleText);
+    if (displayed.visibleText === visibleText) break;
+    terminalContexts.unshift(...displayed.contexts);
+    elementContexts.unshift(...displayed.elementContexts);
+    visibleText = displayed.visibleText;
   }
 
-  const displayed = deriveDisplayedUserMessageState(visibleText);
-
   return {
-    visibleText: displayed.visibleText,
+    visibleText,
     copyText: text,
-    terminalContexts: displayed.contexts,
+    terminalContexts,
     previewAnnotations,
-    elementContexts: displayed.elementContexts,
+    elementContexts,
   };
 }
