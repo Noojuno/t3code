@@ -1,5 +1,5 @@
 import { findThreadSearchOccurrences } from "@t3tools/client-runtime/state/thread-search";
-import { useCallback, useEffect } from "react";
+import { useEffect } from "react";
 import { THREAD_FIND_BLOCK_TAGS } from "./threadFindText";
 
 const THREAD_FIND_HIGHLIGHT_NAME = "t3-thread-find";
@@ -96,63 +96,58 @@ export function useThreadFindHighlights(input: {
 }): void {
   const { container, query, activeRowId, activeOccurrence, onActiveRange } = input;
 
-  const repaint = useCallback(() => {
+  useEffect(() => {
     const api = resolveHighlightApi();
     if (!api) {
       onActiveRange(null);
       return;
     }
-    if (!container || query.length === 0) {
-      onActiveRange(null);
+    const clearHighlights = () => {
       api.registry.delete(THREAD_FIND_HIGHLIGHT_NAME);
       api.registry.delete(THREAD_FIND_ACTIVE_HIGHLIGHT_NAME);
+    };
+    if (!container || query.length === 0) {
+      onActiveRange(null);
+      clearHighlights();
       return;
     }
 
-    let active: Range | null = null;
-    const inactive: Range[] = [];
-    for (const match of collectThreadFindRanges(container, query)) {
-      if (active === null && match.rowId === activeRowId && match.occurrence === activeOccurrence) {
-        active = match.range;
-      } else {
-        inactive.push(match.range);
+    const repaint = () => {
+      let active: Range | null = null;
+      const inactive: Range[] = [];
+      for (const match of collectThreadFindRanges(container, query)) {
+        if (
+          active === null &&
+          match.rowId === activeRowId &&
+          match.occurrence === activeOccurrence
+        ) {
+          active = match.range;
+        } else {
+          inactive.push(match.range);
+        }
       }
-    }
-    onActiveRange(active);
-    api.registry.set(THREAD_FIND_HIGHLIGHT_NAME, new api.Highlight(...inactive));
-    api.registry.set(
-      THREAD_FIND_ACTIVE_HIGHLIGHT_NAME,
-      new api.Highlight(...(active ? [active] : [])),
-    );
-  }, [activeOccurrence, activeRowId, container, onActiveRange, query]);
-
-  useEffect(() => repaint(), [repaint]);
-
-  useEffect(() => {
-    if (!container || query.length === 0) return;
+      onActiveRange(active);
+      api.registry.set(THREAD_FIND_HIGHLIGHT_NAME, new api.Highlight(...inactive));
+      api.registry.set(
+        THREAD_FIND_ACTIVE_HIGHLIGHT_NAME,
+        new api.Highlight(...(active ? [active] : [])),
+      );
+    };
+    repaint();
 
     let frame: number | null = null;
-    const scheduleRepaint = () => {
+    const observer = new MutationObserver(() => {
       if (frame !== null) return;
       frame = requestAnimationFrame(() => {
         frame = null;
         repaint();
       });
-    };
-    const observer = new MutationObserver(scheduleRepaint);
+    });
     observer.observe(container, { subtree: true, childList: true, characterData: true });
     return () => {
       observer.disconnect();
       if (frame !== null) cancelAnimationFrame(frame);
+      clearHighlights();
     };
-  }, [container, query, repaint]);
-
-  useEffect(
-    () => () => {
-      const api = resolveHighlightApi();
-      api?.registry.delete(THREAD_FIND_HIGHLIGHT_NAME);
-      api?.registry.delete(THREAD_FIND_ACTIVE_HIGHLIGHT_NAME);
-    },
-    [],
-  );
+  }, [activeOccurrence, activeRowId, container, onActiveRange, query]);
 }

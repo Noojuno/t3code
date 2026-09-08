@@ -3,10 +3,7 @@ import { findThreadSearchOccurrences } from "@t3tools/client-runtime/state/threa
 import type { TimelineEntry } from "../../session-logic";
 import { proposedPlanTitle, stripDisplayedPlanMarkdown } from "../../proposedPlan";
 import { deriveDisplayedUserMessageContent } from "~/lib/visibleMessageText";
-import {
-  formatInlineTerminalContextLabel,
-  textContainsInlineTerminalContextLabels,
-} from "./userMessageTerminalContexts";
+import { splitUserMessageTerminalContexts } from "./userMessageTerminalContexts";
 import { markdownThreadFindText } from "./threadFindText";
 
 /** One occurrence of the query inside a searchable timeline entry. */
@@ -46,22 +43,11 @@ function deriveThreadEntrySegments(entry: TimelineEntry): readonly string[] | nu
   if (entry.kind !== "message") return null;
   if (entry.message.role === "user") {
     const { visibleText, terminalContexts } = deriveDisplayedUserMessageContent(entry.message.text);
-    if (
-      !terminalContexts.length ||
-      !textContainsInlineTerminalContextLabels(visibleText, terminalContexts)
-    ) {
-      return markdownThreadFindText(visibleText, true);
-    }
-    const segments: string[] = [];
-    let cursor = 0;
-    for (const context of terminalContexts) {
-      const label = formatInlineTerminalContextLabel(context.header);
-      const index = visibleText.indexOf(label, cursor);
-      segments.push(...markdownThreadFindText(visibleText.slice(cursor, index), true));
-      cursor = index + label.length;
-    }
-    segments.push(...markdownThreadFindText(visibleText.slice(cursor), true));
-    return segments;
+    const segments = splitUserMessageTerminalContexts(visibleText, terminalContexts);
+    if (segments === null) return markdownThreadFindText(visibleText, true);
+    return segments.flatMap((segment) =>
+      segment.kind === "text" ? markdownThreadFindText(segment.text, true) : [],
+    );
   }
   if (entry.message.role !== "assistant") return null;
   return markdownThreadFindText(
