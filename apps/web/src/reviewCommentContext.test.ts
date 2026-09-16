@@ -8,7 +8,6 @@ import {
   inferReviewCommentFenceLanguage,
   restoreDiffReviewCommentRange,
 } from "./reviewCommentContext";
-import { parseReviewCommentMessageSegments } from "@t3tools/shared/reviewCommentText";
 
 describe("review comment context parsing", () => {
   it("infers source languages and keeps nested fences inside the selected content", () => {

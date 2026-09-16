@@ -1,8 +1,7 @@
-import { parseReviewCommentMessageSegments } from "./reviewCommentText.ts";
+import { upgradeLegacyContextMessage } from "./composerContextLegacy.ts";
+import { parseComposerContextHref } from "./composerContextReferences.ts";
 import type { OrchestrationMessage } from "@t3tools/contracts";
 import { proposedPlanTitle, stripDisplayedPlanMarkdown } from "./proposedPlanText.ts";
-import { deriveDisplayedUserMessageContent } from "./visibleMessageText.ts";
-import { splitUserMessageTerminalContexts } from "./userMessageTerminalContexts.ts";
 import { unified } from "unified";
 import remarkParse from "remark-parse";
 import remarkRehype from "remark-rehype";
@@ -66,6 +65,7 @@ interface TextTree {
   readonly type: string;
   readonly tagName?: string;
   readonly value?: string;
+  readonly properties?: { readonly href?: unknown; readonly src?: unknown };
   readonly children?: ReadonlyArray<TextTree>;
 }
 
@@ -80,6 +80,11 @@ function markdownThreadFindText(markdown: string, userMessage = false): string[]
     text = "";
   };
   const visit = (node: TextTree, inPre = false) => {
+    const href = node.properties?.href ?? node.properties?.src;
+    if (userMessage && typeof href === "string" && parseComposerContextHref(href)) {
+      flush();
+      return;
+    }
     const block = THREAD_FIND_BLOCK_TAGS.has(node.tagName ?? "");
     if (block) flush();
     if (node.type === "text" || (userMessage && node.type === "raw")) {
@@ -101,23 +106,11 @@ export function searchablePlanSegments(markdown: string): readonly string[] {
 }
 
 export function searchableMessageSegments(
-  message: Pick<OrchestrationMessage, "role" | "text" | "streaming">,
+  message: Pick<OrchestrationMessage, "role" | "text" | "streaming" | "context">,
 ): readonly string[] | null {
   if (message.role === "user") {
-    const { visibleText, terminalContexts } = deriveDisplayedUserMessageContent(message.text);
-    const review = parseReviewCommentMessageSegments(visibleText);
-    if (review.some((segment) => segment.kind === "review-comment")) {
-      return review.flatMap((segment) =>
-        segment.kind === "text"
-          ? markdownThreadFindText(segment.text.trim(), true)
-          : [segment.comment.text.replace(/\r?\n/g, " ")],
-      );
-    }
-    const segments = splitUserMessageTerminalContexts(visibleText, terminalContexts);
-    if (segments === null) return markdownThreadFindText(visibleText, true);
-    return segments.flatMap((segment) =>
-      segment.kind === "text" ? markdownThreadFindText(segment.text, true) : [],
-    );
+    const text = message.context ? message.text : upgradeLegacyContextMessage(message.text).text;
+    return markdownThreadFindText(text, true);
   }
   if (message.role !== "assistant") return null;
   return markdownThreadFindText(message.text || (message.streaming ? "" : "(empty response)"));

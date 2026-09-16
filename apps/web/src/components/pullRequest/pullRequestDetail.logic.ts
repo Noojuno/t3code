@@ -30,10 +30,9 @@ import {
   visibleThreadPullRequests,
 } from "@t3tools/shared/threadPullRequests";
 
-import { inferReviewCommentFenceLanguage } from "~/reviewCommentContext";
+import { inferReviewCommentFenceLanguage, type ReviewCommentContext } from "~/reviewCommentContext";
 import { reviewCommentContextId } from "~/lib/composerContextRecords";
 import { removeInlineContextReference } from "~/lib/composerContextReferences";
-import type { ReviewCommentContext } from "@t3tools/shared/reviewCommentText";
 
 export const PULL_REQUEST_MERGE_METHOD_LABELS: Record<PullRequestMergeMethod, string> = {
   merge: "Merge",

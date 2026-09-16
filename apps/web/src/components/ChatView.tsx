@@ -308,7 +308,7 @@ import {
   formatTerminalContextLabel,
   type TerminalContextDraft,
   type TerminalContextSelection,
-} from "~/lib/terminalContext";
+} from "../lib/terminalContext";
 import {
   ensureInlineContextReferences,
   removeInlineContextReference,
@@ -329,7 +329,7 @@ import {
   useQueuedMessages,
   useQueuedMessageStore,
 } from "../queuedMessageStore";
-import { type ReviewCommentContext } from "@t3tools/shared/reviewCommentText";
+import { type ReviewCommentContext } from "../reviewCommentContext";
 import { environmentCatalog } from "../connection/catalog";
 import { isDesktopLocalConnectionTarget } from "../connection/desktopLocal";
 import { useEnvironmentDisconnectDelay } from "../hooks/useEnvironmentDisconnectDelay";
@@ -539,7 +539,6 @@ const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_USAGE_LIMIT_SOURCES: UsageLimitSourceSnapshots = [];
 const EMPTY_PROVIDER_SKILLS: ServerProvider["skills"] = [];
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
-
 function useDraftHeroLayoutTransition(isDraftHeroState: boolean) {
   const transitionGroupRef = useRef<HTMLDivElement | null>(null);
   const composerAnchorRef = useRef<HTMLDivElement | null>(null);
@@ -6945,7 +6944,6 @@ export default function ChatView(props: ChatViewProps) {
     openThreadFind,
     closeThreadFind,
     isThreadFindActive,
-    previewPanelOpen,
     toggleRightPanel,
     toggleRightPanelMaximized,
     toggleTerminalVisibility,
@@ -9912,7 +9910,7 @@ export default function ChatView(props: ChatViewProps) {
                   paintOnlyDisplayedTimeline ? noopHeldRevert : onRevertTimelineTurn
                 }
                 isRevertingCheckpoint={!paintOnlyDisplayedTimeline && isRevertingCheckpoint}
-                {...threadFind.timelineProps}
+                {...(!paintOnlyDisplayedTimeline ? threadFind.timelineProps : {})}
                 onImageExpand={onExpandTimelineImage}
                 onFileOpen={paintOnlyDisplayedTimeline ? noopHeldAttachment : openFileAttachment}
                 onFileDownload={

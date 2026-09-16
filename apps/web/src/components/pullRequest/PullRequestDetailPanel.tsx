@@ -73,7 +73,7 @@ import { changeRequestRepositoryUrl, gitHubPullRequestBrowserUrl } from "~/lib/o
 import { usePreparePullRequestThreadAction } from "~/lib/sourceControlActions";
 import { cn } from "~/lib/utils";
 import { readLocalApi } from "~/localApi";
-import type { ReviewCommentContext } from "@t3tools/shared/reviewCommentText";
+import type { ReviewCommentContext } from "~/reviewCommentContext";
 import { buildPhysicalToLogicalProjectKeyMap } from "~/sidebarProjectGrouping";
 import { useProjects, useServerConfigs } from "~/state/entities";
 import { useEnvironments, usePrimaryEnvironmentId } from "~/state/environments";

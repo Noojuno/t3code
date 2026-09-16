@@ -12,7 +12,7 @@ import {
   isTerminalContextExpired,
   migrateLegacyTerminalContextPlaceholders,
   type TerminalContextDraft,
-} from "./terminalContext.ts";
+} from "./terminalContext";
 
 function makeContext(overrides?: Partial<TerminalContextDraft>): TerminalContextDraft {
   return {

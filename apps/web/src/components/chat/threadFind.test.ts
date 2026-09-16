@@ -71,7 +71,7 @@ describe("searchableThreadEntryText", () => {
       "check the build",
       "",
       "<terminal_context>",
-      "- pnpm build:",
+      "- Terminal 1 line 12:",
       "  secret sentinel output",
       "</terminal_context>",
     ].join("\n");
@@ -89,7 +89,7 @@ describe("searchableThreadEntryText", () => {
       "</terminal_context>",
     ].join("\n");
 
-    expect(searchableThreadEntryText(messageEntry("m1", "user", prompt))).toBe("check");
+    expect(searchableThreadEntryText(messageEntry("m1", "user", prompt))).toBe("check ");
   });
 
   it("keeps repeated terminal labels that are still visible after the chip", () => {
@@ -100,11 +100,11 @@ describe("searchableThreadEntryText", () => {
     ).toHaveLength(1);
   });
 
-  it("keeps the original text when terminal labels are out of context order", () => {
+  it("excludes terminal chips even when their labels are out of context order", () => {
     const prompt =
       "@terminal-2:12 then @terminal-1:12\n\n<terminal_context>\n- Terminal 1 line 12:\n  12 | first\n- Terminal 2 line 12:\n  12 | second\n</terminal_context>";
     expect(buildThreadFindMatches([messageEntry("m1", "user", prompt)], "@terminal-")).toHaveLength(
-      2,
+      0,
     );
   });
 

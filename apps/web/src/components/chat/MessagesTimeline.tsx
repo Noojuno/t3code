@@ -255,9 +255,9 @@ import { formatWorkspaceRelativePath } from "../../filePathDisplay";
 import {
   buildReviewCommentRenderablePatch,
   formatReviewCommentFence,
+  type ReviewCommentContext,
 } from "../../reviewCommentContext";
 import { PullRequestGlyph } from "~/components/pullRequest/pullRequestIcons";
-import type { ReviewCommentContext } from "@t3tools/shared/reviewCommentText";
 
 // ---------------------------------------------------------------------------
 // Context — shared state consumed by every row component via Context.
@@ -510,6 +510,8 @@ export function MessagesTimeline(props: MessagesTimelineProps) {
             listRef={searchListRef}
             timelineEntries={searchEntries}
             loadEarlier={null}
+            queuedMessages={EMPTY_QUEUED_MESSAGES}
+            worktreeSetup={null}
             citationRequest={null}
             anchorMessageId={null}
             latestTurn={null}
@@ -804,11 +806,11 @@ const ConversationTimeline = memo(function ConversationTimeline({
 
   const activeFindTurnId = activeFindMatch?.turnId;
   const visibleExpandedTurnIds = useMemo(() => {
-    if (!activeFindTurnId || expandedTurnIds.has(activeFindTurnId)) {
-      return expandedTurnIds;
+    if (!activeFindTurnId || paintedExpandedTurnIds.has(activeFindTurnId)) {
+      return paintedExpandedTurnIds;
     }
-    return new Set(expandedTurnIds).add(activeFindTurnId);
-  }, [activeFindTurnId, expandedTurnIds]);
+    return new Set(paintedExpandedTurnIds).add(activeFindTurnId);
+  }, [activeFindTurnId, paintedExpandedTurnIds]);
 
   const rowsProjectionRef = useRef<{
     threadKey: string;
@@ -2184,21 +2186,23 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "message" 
             ? (userFiles.find((file) => file.id === record.attachmentId) ?? null)
             : null;
       return (
-        <UserMessageContextReferenceChip
-          reference={reference}
-          record={record}
-          annotationImage={annotationImage}
-          attachment={attachment}
-          onExpandImage={(image) => {
-            const preview = buildExpandedImagePreview(userImages, image.id);
-            if (preview) onImageExpand(preview);
-          }}
-          onOpenFile={onFileOpen}
-          onExpandVideo={(file) => {
-            const preview = buildAttachmentVideoPreview(ctx.activeThreadEnvironmentId, file);
-            if (preview) onImageExpand(preview);
-          }}
-        />
+        <span data-thread-find-ignore>
+          <UserMessageContextReferenceChip
+            reference={reference}
+            record={record}
+            annotationImage={annotationImage}
+            attachment={attachment}
+            onExpandImage={(image) => {
+              const preview = buildExpandedImagePreview(userImages, image.id);
+              if (preview) onImageExpand(preview);
+            }}
+            onOpenFile={onFileOpen}
+            onExpandVideo={(file) => {
+              const preview = buildAttachmentVideoPreview(ctx.activeThreadEnvironmentId, file);
+              if (preview) onImageExpand(preview);
+            }}
+          />
+        </span>
       );
     },
     [
@@ -2493,25 +2497,25 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
       <div className="relative min-w-0 px-1 py-0.5">
         <MessageAuthorHeading>T3 Code</MessageAuthorHeading>
         <div data-thread-find-text="true">
-        <AssistantCitationSource
-          messageId={row.message.id}
-          {...(ctx.threadRef ? { threadRef: ctx.threadRef } : {})}
-          itemKey={row.id}
-          request={ctx.citationRequest}
-          listRef={ctx.listRef}
-        >
-          <ChatMarkdown
-            text={messageText}
-            cwd={ctx.markdownCwd}
-            threadRef={ctx.threadRef ?? undefined}
-            isStreaming={Boolean(row.message.streaming)}
-            lineBreaks={shouldPreserveAssistantLineBreaks(messageText)}
-            skills={ctx.skills}
-            headingLevelOffset={MESSAGE_HEADING_LEVEL}
-            onUseArtifactTemplate={ctx.onUseArtifactTemplate}
-            onImageExpand={ctx.onImageExpand}
-          />
-        </AssistantCitationSource>
+          <AssistantCitationSource
+            messageId={row.message.id}
+            {...(ctx.threadRef ? { threadRef: ctx.threadRef } : {})}
+            itemKey={row.id}
+            request={ctx.citationRequest}
+            listRef={ctx.listRef}
+          >
+            <ChatMarkdown
+              text={messageText}
+              cwd={ctx.markdownCwd}
+              threadRef={ctx.threadRef ?? undefined}
+              isStreaming={Boolean(row.message.streaming)}
+              lineBreaks={shouldPreserveAssistantLineBreaks(messageText)}
+              skills={ctx.skills}
+              headingLevelOffset={MESSAGE_HEADING_LEVEL}
+              onUseArtifactTemplate={ctx.onUseArtifactTemplate}
+              onImageExpand={ctx.onImageExpand}
+            />
+          </AssistantCitationSource>
         </div>
         <AssistantChangedFilesSection
           turnSummary={row.assistantTurnDiffSummary}
@@ -4179,7 +4183,7 @@ function UserMessageReviewCommentCard({ comment }: { comment: ReviewCommentConte
 
   return (
     <div className="space-y-2 rounded-lg border border-border/70 bg-background/70 p-3">
-      <div className="space-y-1" data-thread-find-ignore>
+      <div className="space-y-1">
         <div className="text-message-foreground text-xs font-medium">
           {formatWorkspaceRelativePath(comment.filePath, ctx.workspaceRoot)}
         </div>
@@ -4192,38 +4196,36 @@ function UserMessageReviewCommentCard({ comment }: { comment: ReviewCommentConte
           <SkillInlineText text={comment.text} skills={ctx.skills} />
         </div>
       )}
-      <div className="space-y-2 empty:hidden" data-thread-find-ignore>
-        {fenceLanguage !== "diff" && comment.diff.trim().length > 0 && (
-          <ChatMarkdown
-            text={formatReviewCommentFence(fenceLanguage, comment.diff)}
-            cwd={ctx.markdownCwd}
-            threadRef={ctx.threadRef ?? undefined}
-            skills={ctx.skills}
-            className="text-message-foreground"
-          />
-        )}
-        {renderablePatch?.kind === "files" && (
-          <DiffWorkerPoolProvider>
-            {renderablePatch.files.map((fileDiff) => (
-              <FileDiff
-                key={resolveFileDiffPath(fileDiff)}
-                fileDiff={fileDiff}
-                options={{
-                  collapsed: false,
-                  diffStyle: "unified",
-                  theme: resolveDiffThemeName(ctx.resolvedTheme),
-                  preferredHighlighter: PREFERRED_HIGHLIGHTER,
-                }}
-              />
-            ))}
-          </DiffWorkerPoolProvider>
-        )}
-        {renderablePatch?.kind === "raw" && (
-          <pre className="overflow-x-auto rounded-md bg-muted/40 p-2 text-xs">
-            {renderablePatch.text}
-          </pre>
-        )}
-      </div>
+      {fenceLanguage !== "diff" && comment.diff.trim().length > 0 && (
+        <ChatMarkdown
+          text={formatReviewCommentFence(fenceLanguage, comment.diff)}
+          cwd={ctx.markdownCwd}
+          threadRef={ctx.threadRef ?? undefined}
+          skills={ctx.skills}
+          className="text-message-foreground"
+        />
+      )}
+      {renderablePatch?.kind === "files" && (
+        <DiffWorkerPoolProvider>
+          {renderablePatch.files.map((fileDiff) => (
+            <FileDiff
+              key={resolveFileDiffPath(fileDiff)}
+              fileDiff={fileDiff}
+              options={{
+                collapsed: false,
+                diffStyle: "unified",
+                theme: resolveDiffThemeName(ctx.resolvedTheme),
+                preferredHighlighter: PREFERRED_HIGHLIGHTER,
+              }}
+            />
+          ))}
+        </DiffWorkerPoolProvider>
+      )}
+      {renderablePatch?.kind === "raw" && (
+        <pre className="overflow-x-auto rounded-md bg-muted/40 p-2 text-xs">
+          {renderablePatch.text}
+        </pre>
+      )}
     </div>
   );
 }

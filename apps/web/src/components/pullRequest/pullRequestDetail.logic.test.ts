@@ -50,7 +50,7 @@ import {
   editPullRequestThreadComment,
   writePullRequestDetailSnapshot,
 } from "./pullRequestDetail.logic";
-import type { ReviewCommentContext } from "@t3tools/shared/reviewCommentText";
+import type { ReviewCommentContext } from "~/reviewCommentContext";
 
 describe("pull request checkout commands", () => {
   it.each([

@@ -363,26 +363,6 @@
       "types": "./src/markdownListIndentation.ts",
       "import": "./src/markdownListIndentation.ts"
     },
-    "./elementContext": {
-      "types": "./src/elementContext.ts",
-      "import": "./src/elementContext.ts"
-    },
-    "./terminalContext": {
-      "types": "./src/terminalContext.ts",
-      "import": "./src/terminalContext.ts"
-    },
-    "./previewAnnotationText": {
-      "types": "./src/previewAnnotationText.ts",
-      "import": "./src/previewAnnotationText.ts"
-    },
-    "./visibleMessageText": {
-      "types": "./src/visibleMessageText.ts",
-      "import": "./src/visibleMessageText.ts"
-    },
-    "./userMessageTerminalContexts": {
-      "types": "./src/userMessageTerminalContexts.ts",
-      "import": "./src/userMessageTerminalContexts.ts"
-    },
     "./proposedPlanText": {
       "types": "./src/proposedPlanText.ts",
       "import": "./src/proposedPlanText.ts"
@@ -398,10 +378,6 @@
     "./threadSearch": {
       "types": "./src/threadSearch.ts",
       "import": "./src/threadSearch.ts"
-    },
-    "./reviewCommentText": {
-      "types": "./src/reviewCommentText.ts",
-      "import": "./src/reviewCommentText.ts"
     }
   },
   "scripts": {

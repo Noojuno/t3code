@@ -2,6 +2,8 @@ import {
   ChatAttachment,
   MessageId,
   OrchestrationProposedPlan,
+  OrchestrationMessageRole,
+  OrchestrationMessageContext,
   ThreadId,
   TurnId,
   type OrchestrationSearchThreadInput,
@@ -27,7 +29,8 @@ const SourceRow = Schema.Struct({
   id: Schema.String,
   turnId: Schema.NullOr(TurnId),
   text: Schema.String,
-  role: Schema.Literals(["user", "assistant", "system"]),
+  role: OrchestrationMessageRole,
+  context: Schema.NullOr(Schema.fromJsonString(OrchestrationMessageContext)),
   streaming: Schema.Number,
   createdAt: Schema.String,
 });
@@ -51,7 +54,7 @@ export const makeThreadFindQuery = Effect.fn("makeThreadFindQuery")(function* (
     Result: SourceRow,
     execute: ({ threadId, createdAt, id }) => sql`
       SELECT message_id AS id, turn_id AS "turnId", text, role,
-        is_streaming AS streaming, created_at AS "createdAt"
+        is_streaming AS streaming, context_json AS context, created_at AS "createdAt"
       FROM projection_thread_messages
       WHERE thread_id = ${threadId} AND (created_at, message_id) > (${createdAt}, ${id})
       ORDER BY created_at, message_id LIMIT 128`,
@@ -61,7 +64,7 @@ export const makeThreadFindQuery = Effect.fn("makeThreadFindQuery")(function* (
     Result: SourceRow,
     execute: ({ threadId, createdAt, id }) => sql`
       SELECT plan_id AS id, turn_id AS "turnId", plan_markdown AS text,
-        'assistant' AS role, 0 AS streaming, created_at AS "createdAt"
+        'assistant' AS role, NULL AS context, 0 AS streaming, created_at AS "createdAt"
       FROM projection_thread_proposed_plans
       WHERE thread_id = ${threadId} AND (created_at, plan_id) > (${createdAt}, ${id})
       ORDER BY created_at, plan_id LIMIT 128`,
@@ -89,7 +92,11 @@ export const makeThreadFindQuery = Effect.fn("makeThreadFindQuery")(function* (
           const segments =
             source === "plan"
               ? searchablePlanSegments(row.text)
-              : searchableMessageSegments({ ...row, streaming: row.streaming === 1 });
+              : searchableMessageSegments({
+                  ...row,
+                  context: row.context ?? undefined,
+                  streaming: row.streaming === 1,
+                });
           const count =
             segments?.reduce(
               (sum, text) => sum + countThreadSearchOccurrences(text, key.query),
@@ -129,6 +136,7 @@ export const makeThreadFindQuery = Effect.fn("makeThreadFindQuery")(function* (
       id: MessageId,
       turnId: Schema.NullOr(TurnId),
       role: SourceRow.fields.role,
+      context: SourceRow.fields.context,
       text: Schema.String,
       streaming: Schema.Number,
       attachments: Schema.NullOr(Schema.fromJsonString(Schema.Array(ChatAttachment))),
@@ -137,7 +145,7 @@ export const makeThreadFindQuery = Effect.fn("makeThreadFindQuery")(function* (
     }),
     execute: ({ threadId, createdAt, id }) => sql`
       SELECT message_id AS id, turn_id AS "turnId", role, text,
-        is_streaming AS streaming, attachments_json AS attachments,
+        is_streaming AS streaming, attachments_json AS attachments, context_json AS context,
         created_at AS "createdAt", updated_at AS "updatedAt"
       FROM (
         SELECT * FROM (SELECT * FROM projection_thread_messages
@@ -206,9 +214,10 @@ export const makeThreadFindQuery = Effect.fn("makeThreadFindQuery")(function* (
           turnId: selected.turnId,
           occurrence,
         },
-        messages: contextMessages.map(({ streaming, attachments, ...message }) => ({
+        messages: contextMessages.map(({ streaming, attachments, context, ...message }) => ({
           ...message,
           streaming: streaming === 1,
+          ...(context === null ? {} : { context }),
           ...(attachments === null ? {} : { attachments }),
         })),
         proposedPlans,

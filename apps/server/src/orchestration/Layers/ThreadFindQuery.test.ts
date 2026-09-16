@@ -62,6 +62,40 @@ it.layer(SqlitePersistenceMemory)("ThreadFindQuery", (it) => {
       }),
   );
 
+  it.effect("preserves message context and tolerates reasoning rows in search windows", () =>
+    Effect.gen(function* () {
+      const { search, message, sql } = yield* setup;
+      yield* message("a", "needle", "reasoning");
+      yield* message("b", "needle [hidden label](t3-context://v1/terminal/terminal_1)", "user");
+      const context = {
+        version: 1,
+        records: [
+          {
+            version: 1,
+            contextId: "terminal_1",
+            kind: "terminal",
+            label: "hidden label",
+            terminalId: "default",
+            terminalLabel: "Terminal 1",
+            lineStart: 1,
+            lineEnd: 1,
+            text: "hidden payload",
+          },
+        ],
+      };
+      yield* sql`UPDATE projection_thread_messages SET context_json = ${JSON.stringify(context)} WHERE message_id = 'b'`;
+      const result = yield* search({ threadId, query: "needle" });
+      assert.equal(result.totalMatches, 1);
+      assert.equal(result.match?.sourceId, "b");
+      assert.deepStrictEqual(
+        result.messages.find((message) => message.id === "b")?.context,
+        context,
+      );
+      assert.equal(result.messages[0]?.role, "reasoning");
+      assert.equal((yield* search({ threadId, query: "hidden" })).totalMatches, 0);
+    }),
+  );
+
   it.effect("preserves substring, punctuation, block boundaries and Unicode matching", () =>
     Effect.gen(function* () {
       const { search, message } = yield* setup;

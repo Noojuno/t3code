@@ -86,7 +86,7 @@ import {
   INLINE_TERMINAL_CONTEXT_PLACEHOLDER,
   formatTerminalContextReference,
   type TerminalContextDraft,
-} from "~/lib/terminalContext";
+} from "./lib/terminalContext";
 import { createDeferredStorage } from "./lib/storage";
 
 function makeImage(input: {
