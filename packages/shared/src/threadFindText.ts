@@ -1,12 +1,14 @@
 import { renderCodexFileCitationsAsMarkdown } from "./codexMarkdownDirectives.ts";
 import {
   buildFileLinkParentSuffixByPath,
+  splitFilePathPosition,
+  fileLinkLabel,
+} from "./fileLinks.ts";
+import {
   extractMarkdownLinkHrefs,
   extractInlineCodeSpans,
   inlineCodeFilePathCandidate,
   resolveMarkdownFileLinkTarget,
-  splitFilePathPosition,
-  markdownFileLinkLabel,
 } from "./markdownLinks.ts";
 import { upgradeLegacyContextMessage } from "./composerContextLegacy.ts";
 import { parseComposerContextHref } from "./composerContextReferences.ts";
@@ -126,7 +128,7 @@ function markdownThreadFindText(markdown: string, userMessage = false, cwd?: str
       }
       const target = candidate ? resolveMarkdownFileLinkTarget(candidate, cwd) : null;
       if (target) {
-        text += markdownFileLinkLabel(splitFilePathPosition(target), parentSuffixes);
+        text += fileLinkLabel(splitFilePathPosition(target), parentSuffixes);
         return;
       }
     }

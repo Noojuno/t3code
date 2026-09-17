@@ -1,12 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
-  fileBasename,
   inlineCodeFilePathCandidate,
-  parseFileUrlHref,
   parseMarkdownFileLink,
-  splitFilePathPosition,
-  workspaceRelativeFilePath,
+  isWindowsDrivePathHref,
+  extractMarkdownLinkHrefs,
+  resolveMarkdownFileLinkTarget,
 } from "./markdownLinks.ts";
 
 describe("inlineCodeFilePathCandidate", () => {
@@ -24,46 +23,6 @@ describe("inlineCodeFilePathCandidate", () => {
     ["example.pl/index.html", null],
   ])("distinguishes file paths from code and hostnames in %s", (source, candidate) => {
     expect(inlineCodeFilePathCandidate(source)).toBe(candidate);
-  });
-});
-
-describe("parseFileUrlHref", () => {
-  it.each([
-    ["file:///Users/julius/project/src/main.ts#L42", "/Users/julius/project/src/main.ts", "#L42"],
-    [
-      "file:///D:/Programme/t3code/OpenInPicker.tsx#L69",
-      "D:/Programme/t3code/OpenInPicker.tsx",
-      "#L69",
-    ],
-    ["file://server/share/workspace-image.svg", "\\\\server\\share\\workspace-image.svg", ""],
-    ["file://localhost/home/me/notes.md", "/home/me/notes.md", ""],
-  ])("parses %s", (href, path, hash) => {
-    expect(parseFileUrlHref(href)).toEqual({ path, hash });
-  });
-
-  it("keeps percent-encoding so the caller decodes once", () => {
-    expect(parseFileUrlHref("file:///Users/julius/project/file%2520name.md")?.path).toBe(
-      "/Users/julius/project/file%2520name.md",
-    );
-    expect(parseFileUrlHref("file:///c%3A/Users/x/shot.png")?.path).toBe("/c%3A/Users/x/shot.png");
-  });
-
-  it.each(["https://example.com/a.ts", "file://%", "/Users/julius/a.ts"])("rejects %s", (href) => {
-    expect(parseFileUrlHref(href)).toBeNull();
-  });
-});
-
-describe("splitFilePathPosition", () => {
-  it.each([
-    ["src/main.ts", "", { path: "src/main.ts" }],
-    ["src/main.ts:12", "", { path: "src/main.ts", line: 12 }],
-    ["src/main.ts:12:5", "", { path: "src/main.ts", line: 12, column: 5 }],
-    ["src/main.ts", "#L18C2", { path: "src/main.ts", line: 18, column: 2 }],
-    ["src/main.ts:3", "#L18C2", { path: "src/main.ts", line: 3 }],
-    ["src/main.ts:0", "", { path: "src/main.ts" }],
-    ["src/main.ts", "#section", { path: "src/main.ts" }],
-  ])("splits %s%s", (path, hash, expected) => {
-    expect(splitFilePathPosition(path, hash)).toEqual(expected);
   });
 });
 
@@ -132,39 +91,118 @@ describe("parseMarkdownFileLink", () => {
   });
 });
 
-describe("fileBasename", () => {
+describe("isWindowsDrivePathHref", () => {
   it.each([
-    ["/tmp/favicons/", "favicons"],
-    ["C:\\Users\\kelchm\\.claude\\", ".claude"],
-    ["/tmp/", "tmp"],
-    ["AGENTS.md", "AGENTS.md"],
-    ["/", "/"],
-  ])("labels %s as %s", (path, basename) => {
-    expect(fileBasename(path)).toBe(basename);
+    ["C:\\repo\\image.png", true],
+    ["C:%5Crepo%5Cimage.png", true],
+    ["https://example.com/image.png", false],
+  ])("classifies %s as %s", (href, expected) => {
+    expect(isWindowsDrivePathHref(href)).toBe(expected);
   });
 });
 
-describe("workspaceRelativeFilePath", () => {
-  it.each([
-    ["/repo/project/src/main.ts", "/repo/project", "src/main.ts"],
-    ["/repo/project/src/main.ts", "/repo/project/", "src/main.ts"],
-    ["C:\\Users\\mike\\t3code\\apps\\web\\a.ts", "C:/Users/mike/t3code", "apps/web/a.ts"],
-    ["/C:/Users/mike/t3code/apps/web/a.ts", "C:/Users/mike/t3code", "apps/web/a.ts"],
-    ["/Repo/Project/src/main.ts", "/repo/project", null],
-    ["/tmp/case/project/probe.txt", "/tmp/case/Project", null],
-    ["//tmp/case/project/probe.txt", "//tmp/case/Project", null],
-    ["/tmp/case/Project/probe.txt", "/tmp/case/Project", "probe.txt"],
-    ["C:/USERS/mike/t3code/main.ts", "c:/users/MIKE/t3code", "main.ts"],
-    ["/C:/USERS/mike/t3code/main.ts", "/c:/users/MIKE/t3code", "main.ts"],
-    ["\\\\server\\share\\PROJECT\\main.ts", "\\\\Server\\Share\\Project", "main.ts"],
-    ["/tmp/repo/file.ts", "/", "tmp/repo/file.ts"],
-    ["C:/Users/MIKE/main.ts", "c:/", "Users/MIKE/main.ts"],
-    ["\\\\server\\SHARE\\file.ts", "\\\\Server\\Share\\", "file.ts"],
-    ["/tmp/repo/file.ts ", "/tmp/repo", "file.ts "],
-    ["/tmp/report.ts", "/repo/project", null],
-    ["/repo/project-two/a.ts", "/repo/project", null],
-    ["/repo/project/a.ts", undefined, null],
-  ])("relates %s to %s", (path, workspaceRoot, relativePath) => {
-    expect(workspaceRelativeFilePath(path, workspaceRoot)).toBe(relativePath);
+describe("extractMarkdownLinkHrefs", () => {
+  it("extracts angle-bracketed paths containing spaces", () => {
+    expect(
+      extractMarkdownLinkHrefs(
+        "[Open the Bike Receipts folder](</Users/dara/Downloads/Lime Ride Artifacts/Bike Receipts>)",
+      ),
+    ).toEqual(["/Users/dara/Downloads/Lime Ride Artifacts/Bike Receipts"]);
+  });
+
+  it("preserves ordinary destinations and ignores link titles", () => {
+    expect(
+      extractMarkdownLinkHrefs(
+        '[source](apps/web/src/markdown-links.ts "implementation") and [docs](https://example.com)',
+      ),
+    ).toEqual(["apps/web/src/markdown-links.ts", "https://example.com"]);
+  });
+});
+
+describe("resolveMarkdownFileLinkTarget", () => {
+  it("resolves absolute posix file paths", () => {
+    expect(resolveMarkdownFileLinkTarget("/Users/julius/project/AGENTS.md")).toBe(
+      "/Users/julius/project/AGENTS.md",
+    );
+  });
+
+  it("resolves relative file paths against cwd", () => {
+    expect(resolveMarkdownFileLinkTarget("src/processRunner.ts:71", "/Users/julius/project")).toBe(
+      "/Users/julius/project/src/processRunner.ts:71",
+    );
+  });
+
+  it("does not treat filename line references as external schemes", () => {
+    expect(resolveMarkdownFileLinkTarget("script.ts:10", "/Users/julius/project")).toBe(
+      "/Users/julius/project/script.ts:10",
+    );
+  });
+
+  it("resolves bare file names against cwd", () => {
+    expect(resolveMarkdownFileLinkTarget("AGENTS.md", "/Users/julius/project")).toBe(
+      "/Users/julius/project/AGENTS.md",
+    );
+  });
+
+  it("maps #L line anchors to editor line suffixes", () => {
+    expect(resolveMarkdownFileLinkTarget("/Users/julius/project/src/main.ts#L42C7")).toBe(
+      "/Users/julius/project/src/main.ts:42:7",
+    );
+  });
+
+  it("ignores external urls", () => {
+    expect(resolveMarkdownFileLinkTarget("https://example.com/docs")).toBeNull();
+    expect(resolveMarkdownFileLinkTarget("//cdn.example.com/clip.mp4", "/workspace")).toBeNull();
+  });
+
+  it("does not double-decode file URLs", () => {
+    expect(resolveMarkdownFileLinkTarget("file:///Users/julius/project/file%2520name.md")).toBe(
+      "/Users/julius/project/file%20name.md",
+    );
+  });
+
+  it("resolves file uri authorities as windows UNC paths", () => {
+    expect(resolveMarkdownFileLinkTarget("file://server/share/workspace-image.svg")).toBe(
+      "\\\\server\\share\\workspace-image.svg",
+    );
+  });
+
+  it("resolves a localhost file uri as a local path", () => {
+    expect(resolveMarkdownFileLinkTarget("file://localhost/home/me/notes.md")).toBe(
+      "/home/me/notes.md",
+    );
+  });
+
+  it("keeps an encoded final space in the absolute target", () => {
+    expect(resolveMarkdownFileLinkTarget("/tmp/repo/file.ts%20", "/tmp/repo")).toBe(
+      "/tmp/repo/file.ts ",
+    );
+  });
+
+  it("normalizes slash-prefixed windows drive paths before resolving", () => {
+    expect(
+      resolveMarkdownFileLinkTarget(
+        "/D:/Programme/t3code/apps/web/src/components/chat/OpenInPicker.tsx#L69",
+      ),
+    ).toBe("D:/Programme/t3code/apps/web/src/components/chat/OpenInPicker.tsx:69");
+  });
+
+  it("resolves angle-bracketed windows drive paths", () => {
+    expect(
+      resolveMarkdownFileLinkTarget(
+        "</D:/Programme/t3code/apps/web/src/components/ChatMarkdown.tsx:1>",
+      ),
+    ).toBe("D:/Programme/t3code/apps/web/src/components/ChatMarkdown.tsx:1");
+  });
+
+  it("does not treat app routes as file links, even with a line anchor", () => {
+    expect(resolveMarkdownFileLinkTarget("/chat/settings")).toBeNull();
+    expect(resolveMarkdownFileLinkTarget("/chat/settings#L3", "/repo")).toBeNull();
+  });
+
+  it("decodes an encoded drive colon in a file uri before dropping its slash", () => {
+    expect(resolveMarkdownFileLinkTarget("file:///c%3A/Users/x/shot.png")).toBe(
+      "c:/Users/x/shot.png",
+    );
   });
 });

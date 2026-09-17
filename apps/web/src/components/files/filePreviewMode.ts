@@ -1,4 +1,4 @@
-import { isAbsolutePath } from "@t3tools/shared/markdownLinks";
+import { isAbsolutePath } from "@t3tools/shared/path";
 
 export const isMarkdownPreviewFile = (path: string): boolean => /\.(?:md|mdx)$/i.test(path);
 

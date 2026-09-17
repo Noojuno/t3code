@@ -9,13 +9,7 @@ import {
   CODEX_ARTIFACT_TEMPLATE_HAST_PROPERTIES,
   remarkCodexDirectives,
 } from "./codexMarkdownDirectives.ts";
-function isWindowsDrivePathHref(href: string): boolean {
-  try {
-    return /^[A-Za-z]:[\\/]/.test(decodeURIComponent(href));
-  } catch {
-    return /^[A-Za-z]:[\\/]/.test(href);
-  }
-}
+import { isWindowsDrivePathHref } from "./markdownLinks.ts";
 
 type MarkdownImageHastNode = {
   type?: string;
@@ -37,7 +31,6 @@ function meaningfulHastChildren(node: MarkdownImageHastNode): MarkdownImageHastN
  * in a sentence — stay inline at their natural size, since a placeholder taller
  * than the image would move the page more than the image itself does.
  */
-/** Containers whose sole child image reads as a figure rather than part of a sentence. */
 const STANDALONE_IMAGE_BLOCKS = new Set([
   "p",
   "div",

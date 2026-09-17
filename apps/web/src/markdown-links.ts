@@ -1,18 +1,13 @@
+import { fileBasename, workspaceRelativeFilePath } from "@t3tools/shared/path";
 import {
-  fileBasename,
   inlineCodeFilePathCandidate,
   normalizeMarkdownLinkDestination,
-  parseFileUrlHref,
-  safeDecodeURIComponent,
-  splitFilePathPosition,
-  workspaceRelativeFilePath,
+  resolveMarkdownFileLinkTarget,
 } from "@t3tools/shared/markdownLinks";
+import { parseFileUrlHref, splitFilePathPosition } from "@t3tools/shared/fileLinks";
 
 import { formatWorkspaceRelativePath } from "./filePathDisplay";
 import { isTerminalLinkActivation } from "./terminal-links";
-import { resolveMarkdownFileLinkTarget } from "@t3tools/shared/markdownLinks";
-
-export { normalizeMarkdownLinkDestination };
 
 export interface MarkdownFileLinkMeta {
   filePath: string;
@@ -33,10 +28,6 @@ export function shouldOpenMarkdownFileLinkInEditor(
 
 export function shouldOpenMarkdownFileLinkInBrowserByDefault(path: string): boolean {
   return /\.pdf$/i.test(path.split(/[?#]/, 1)[0] ?? "");
-}
-
-export function isWindowsDrivePathHref(href: string): boolean {
-  return /^[A-Za-z]:[\\/]/.test(safeDecodeURIComponent(href));
 }
 
 export function rewriteMarkdownFileUriHref(href: string | undefined): string | null {

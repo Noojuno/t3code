@@ -1,4 +1,4 @@
-export interface ThreadSearchTextPart {
+interface ThreadSearchTextPart {
   readonly text: string;
   readonly highlighted: boolean;
   readonly start: number;

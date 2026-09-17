@@ -1,13 +1,17 @@
 import { MarkdownFindContext } from "./chat/markdownFindContext";
 import {
   buildFileLinkParentSuffixByPath,
+  fileLinkLabel,
+  resolvePathLinkTarget,
+} from "@t3tools/shared/fileLinks";
+import {
+  isWindowsDrivePathHref,
+  normalizeMarkdownLinkDestination,
   extractInlineCodeSpans,
   extractMarkdownLinkHrefs,
-  markdownFileLinkLabel,
   inlineCodeFilePathCandidate,
-  isAbsolutePath,
-  resolvePathLinkTarget,
 } from "@t3tools/shared/markdownLinks";
+import { isAbsolutePath } from "@t3tools/shared/path";
 import { usePullRequestLinking } from "~/hooks/usePullRequestLinking";
 import {
   CHAT_MARKDOWN_REMARK_PLUGINS,
@@ -153,8 +157,6 @@ import {
   serializeTableElementToMarkdown,
 } from "../markdown-clipboard";
 import {
-  isWindowsDrivePathHref,
-  normalizeMarkdownLinkDestination,
   resolveInlineCodeFileLinkMeta,
   resolveMarkdownFileLinkMeta,
   rewriteMarkdownFileUriHref,
@@ -2327,7 +2329,7 @@ function useChatMarkdownState({
       className?: string,
       mediaSource?: string,
     ) => {
-      const label = markdownFileLinkLabel(
+      const label = fileLinkLabel(
         { ...fileLinkMeta, path: fileLinkMeta.filePath },
         fileLinkParentSuffixByPath,
       );

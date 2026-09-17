@@ -6,7 +6,6 @@ import {
   buildThreadFindMatches,
   clampThreadFindIndex,
   formatThreadFindCount,
-  searchableThreadEntryText,
   stepThreadFindIndex,
 } from "./threadFind";
 
@@ -65,7 +64,7 @@ function proposedPlanEntry(id: string, planMarkdown: string, turnId: TurnId | nu
   };
 }
 
-describe("searchableThreadEntryText", () => {
+describe("searchable thread entries", () => {
   it("searches displayed user text without appended context payloads", () => {
     const prompt = [
       "check the build",
@@ -76,7 +75,9 @@ describe("searchableThreadEntryText", () => {
       "</terminal_context>",
     ].join("\n");
 
-    expect(searchableThreadEntryText(messageEntry("m1", "user", prompt))).toBe("check the build");
+    const entries = [messageEntry("m1", "user", prompt)];
+    expect(buildThreadFindMatches(entries, "check the build")).toHaveLength(1);
+    expect(buildThreadFindMatches(entries, "sentinel")).toHaveLength(0);
   });
 
   it("excludes terminal labels that render as non-searchable chips", () => {
@@ -89,7 +90,9 @@ describe("searchableThreadEntryText", () => {
       "</terminal_context>",
     ].join("\n");
 
-    expect(searchableThreadEntryText(messageEntry("m1", "user", prompt))).toBe("check ");
+    const entries = [messageEntry("m1", "user", prompt)];
+    expect(buildThreadFindMatches(entries, "check")).toHaveLength(1);
+    expect(buildThreadFindMatches(entries, "@terminal-1:12")).toHaveLength(0);
   });
 
   it("keeps repeated terminal labels that are still visible after the chip", () => {
@@ -168,20 +171,25 @@ describe("searchableThreadEntryText", () => {
   });
 
   it("indexes the rendered placeholder for empty assistant responses", () => {
-    expect(searchableThreadEntryText(messageEntry("m1", "assistant", ""))).toBe("(empty response)");
+    expect(
+      buildThreadFindMatches([messageEntry("m1", "assistant", "")], "(empty response)"),
+    ).toHaveLength(1);
   });
 
   it("skips work rows and system messages", () => {
-    expect(searchableThreadEntryText(workEntry("w1"))).toBeNull();
-    expect(searchableThreadEntryText(messageEntry("s1", "system", "sentinel"))).toBeNull();
+    expect(
+      buildThreadFindMatches(
+        [workEntry("w1"), messageEntry("s1", "system", "sentinel")],
+        "sentinel",
+      ),
+    ).toHaveLength(0);
   });
 
   it("uses the displayed proposed-plan title and body", () => {
-    expect(
-      searchableThreadEntryText(
-        proposedPlanEntry("p1", "# Visible title\n\n## Summary\n\nship it", null),
-      ),
-    ).toBe("Visible title\nship it");
+    const entries = [proposedPlanEntry("p1", "# Visible title\n\n## Summary\n\nship it", null)];
+    expect(buildThreadFindMatches(entries, "Visible title")).toHaveLength(1);
+    expect(buildThreadFindMatches(entries, "ship it")).toHaveLength(1);
+    expect(buildThreadFindMatches(entries, "Summary")).toHaveLength(0);
   });
 });
 

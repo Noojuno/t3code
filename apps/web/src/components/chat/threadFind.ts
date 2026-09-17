@@ -35,11 +35,6 @@ function searchableThreadEntrySegments(
   return segments;
 }
 
-/** Conversation text only: source-only Markdown and generated controls are excluded. */
-export function searchableThreadEntryText(entry: TimelineEntry): string | null {
-  return searchableThreadEntrySegments(entry)?.join("\n") ?? null;
-}
-
 function threadEntryTurnId(entry: TimelineEntry): TurnId | null {
   if (entry.kind === "message") return entry.message.turnId ?? null;
   if (entry.kind === "proposed-plan") return entry.proposedPlan.turnId;

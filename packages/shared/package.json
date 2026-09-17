@@ -382,6 +382,10 @@
     "./markdownLinks": {
       "types": "./src/markdownLinks.ts",
       "import": "./src/markdownLinks.ts"
+    },
+    "./fileLinks": {
+      "types": "./src/fileLinks.ts",
+      "import": "./src/fileLinks.ts"
     }
   },
   "scripts": {
