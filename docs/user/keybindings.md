@@ -95,8 +95,8 @@ Combine keys with `!` for not, `&&` for and, `||` for or, and parentheses:
 ## Find in the current thread
 
 `chat.find` searches conversation messages and proposed plans in the active thread. Entering a
-query loads earlier history before showing the match total. If loading stops, you can navigate
-the partial results or select **Search older** to retry. It defaults to
+query searches the entire thread, including older messages. When connected to an older server,
+search loads earlier history first. Select **Retry** if a search or history load fails. It defaults to
 `mod+f` outside terminals and previews. Press **Enter** or **Shift+Enter** to move between matches,
 and **Escape** to close find.
 

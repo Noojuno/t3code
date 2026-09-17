@@ -1,4 +1,4 @@
-import { isWindowsAbsolutePath } from "@t3tools/shared/path";
+import { isWindowsAbsolutePath } from "./path.ts";
 
 const SLASH_PREFIXED_WINDOWS_DRIVE_PATTERN = /^\/[A-Za-z]:[\\/]/;
 const RELATIVE_PATH_PREFIX_PATTERN = /^(~\/|\.{1,2}\/)/;
@@ -261,7 +261,7 @@ export function formatFilePathPosition(position: FilePathPosition): string {
   return `${position.path}:${position.line}${position.column ? `:${position.column}` : ""}`;
 }
 
-export function isRelativeFilePath(path: string): boolean {
+function isRelativeFilePath(path: string): boolean {
   return (
     RELATIVE_PATH_PREFIX_PATTERN.test(path) ||
     (!path.startsWith("/") && !isWindowsAbsolutePath(path))
@@ -338,4 +338,180 @@ export function workspaceRelativeFilePath(
   const rootForCompare = caseInsensitive ? normalizedRoot.toLowerCase() : normalizedRoot;
   if (!pathForCompare.startsWith(`${rootForCompare}/`)) return null;
   return normalizedPath.slice(normalizedRoot.length + 1);
+}
+
+export function isAbsolutePath(value: string): boolean {
+  return value.startsWith("/") || isWindowsAbsolutePath(value);
+}
+
+function isWindowsPathStyle(value: string): boolean {
+  return isWindowsAbsolutePath(value) || /[A-Za-z]:\\/.test(value);
+}
+
+function joinPath(base: string, next: string, separator: "/" | "\\"): string {
+  const cleanBase = base.replace(/[\\/]+$/, "");
+  if (separator === "\\") {
+    return `${cleanBase}\\${next.replaceAll("/", "\\")}`;
+  }
+  return `${cleanBase}/${next.replace(/^\/+/, "")}`;
+}
+
+function inferHomeFromCwd(cwd: string): string | undefined {
+  const posixUser = cwd.match(/^\/Users\/([^/]+)/);
+  if (posixUser?.[1]) {
+    return `/Users/${posixUser[1]}`;
+  }
+
+  const posixHome = cwd.match(/^\/home\/([^/]+)/);
+  if (posixHome?.[1]) {
+    return `/home/${posixHome[1]}`;
+  }
+
+  const windowsUser = cwd.match(/^([A-Za-z]:\\Users\\[^\\]+)/);
+  if (windowsUser?.[1]) {
+    return windowsUser[1];
+  }
+
+  return undefined;
+}
+
+export function resolvePathLinkTarget(rawPath: string, cwd: string): string {
+  const position = splitFilePathPosition(rawPath);
+  const { path } = position;
+
+  let resolvedPath = path;
+  if (path.startsWith("~/")) {
+    const home = inferHomeFromCwd(cwd);
+    if (home) {
+      const separator: "/" | "\\" = isWindowsPathStyle(home) ? "\\" : "/";
+      resolvedPath = joinPath(home, path.slice(2), separator);
+    }
+  } else if (!isAbsolutePath(path)) {
+    const separator: "/" | "\\" = isWindowsPathStyle(cwd) ? "\\" : "/";
+    resolvedPath = joinPath(cwd, path, separator);
+  }
+
+  return formatFilePathPosition({ ...position, path: resolvedPath });
+}
+
+function pathParentSegments(path: string): string[] {
+  const normalized = path.replaceAll("\\", "/");
+  const segments = normalized.split("/").filter((segment) => segment.length > 0);
+  return segments.slice(0, -1);
+}
+
+export function buildFileLinkParentSuffixByPath(
+  filePaths: ReadonlyArray<string>,
+): Map<string, string> {
+  const groups = new Map<string, Set<string>>();
+  for (const filePath of filePaths) {
+    const normalizedPath = filePath.replaceAll("\\", "/");
+    const pathSegments = normalizedPath.split("/").filter((segment) => segment.length > 0);
+    const basename = pathSegments[pathSegments.length - 1];
+    if (!basename) continue;
+    const group = groups.get(basename) ?? new Set<string>();
+    group.add(normalizedPath);
+    groups.set(basename, group);
+  }
+
+  const suffixByPath = new Map<string, string>();
+  for (const group of groups.values()) {
+    const uniquePaths = [...group];
+    if (uniquePaths.length < 2) continue;
+
+    const parentSegmentsByPath = new Map(
+      uniquePaths.map((filePath) => [filePath, pathParentSegments(filePath)]),
+    );
+    const minUniqueDepthByPath = new Map<string, number>();
+
+    for (const filePath of uniquePaths) {
+      const segments = parentSegmentsByPath.get(filePath) ?? [];
+      let resolvedDepth = segments.length;
+      for (let depth = 1; depth <= segments.length; depth += 1) {
+        const candidate = segments.slice(-depth).join("/");
+        const collision = uniquePaths.some((otherPath) => {
+          if (otherPath === filePath) return false;
+          const otherSegments = parentSegmentsByPath.get(otherPath) ?? [];
+          return otherSegments.slice(-depth).join("/") === candidate;
+        });
+        if (!collision) {
+          resolvedDepth = depth;
+          break;
+        }
+      }
+      minUniqueDepthByPath.set(filePath, resolvedDepth);
+    }
+
+    for (const filePath of uniquePaths) {
+      const segments = parentSegmentsByPath.get(filePath) ?? [];
+      if (segments.length === 0) continue;
+      const minUniqueDepth = minUniqueDepthByPath.get(filePath) ?? 1;
+      const suffixDepth = Math.min(segments.length, Math.max(minUniqueDepth, 2));
+      suffixByPath.set(filePath, segments.slice(-suffixDepth).join("/"));
+    }
+  }
+
+  return suffixByPath;
+}
+
+const FENCED_CODE_SEGMENT_PATTERN = /(```[\s\S]*?(?:```|$))/;
+const INLINE_CODE_SPAN_PATTERN = /`([^`\n]+)`/g;
+
+export function extractInlineCodeSpans(text: string): string[] {
+  const spans: string[] = [];
+  const segments = text.split(FENCED_CODE_SEGMENT_PATTERN);
+  for (let index = 0; index < segments.length; index += 2) {
+    for (const match of (segments[index] ?? "").matchAll(INLINE_CODE_SPAN_PATTERN)) {
+      const span = match[1]?.trim();
+      if (span) spans.push(span);
+    }
+  }
+  return spans;
+}
+
+const MARKDOWN_LINK_HREF_PATTERN =
+  /\[[^\]]*]\(\s*(?:<([^>\n]+)>|([^\s)]+))(?:\s+["'][^"']*["'])?\s*\)/g;
+
+export function extractMarkdownLinkHrefs(markdown: string): string[] {
+  const hrefs: string[] = [];
+  for (const match of markdown.matchAll(MARKDOWN_LINK_HREF_PATTERN)) {
+    const href = (match[1] ?? match[2])?.trim();
+    if (href) hrefs.push(href);
+  }
+  return hrefs;
+}
+
+/**
+ * `baseDir` anchors relative links; it defaults to the workspace root and is the
+ * file's own directory when rendering a markdown file. `cwd` stays the workspace
+ * root so the result still knows whether the target is inside it.
+ */
+export function resolveMarkdownFileLinkTarget(
+  href: string | undefined,
+  cwd?: string,
+  baseDir: string | undefined = cwd,
+): string | null {
+  if (!href) return null;
+  const target = parseMarkdownFileLink(href);
+  if (!target) return null;
+
+  const pathWithPosition = formatFilePathPosition(target);
+  if (!isRelativeFilePath(pathWithPosition)) return pathWithPosition;
+  if (!baseDir) return null;
+  return resolvePathLinkTarget(pathWithPosition, baseDir);
+}
+
+/** Visible text of a file chip, shared by Markdown rendering and thread search. */
+export function markdownFileLinkLabel(
+  file: FilePathPosition,
+  parentSuffixByPath: ReadonlyMap<string, string>,
+): string {
+  const suffix = parentSuffixByPath.get(file.path.replaceAll("\\", "/"));
+  return [
+    fileBasename(file.path),
+    suffix,
+    file.line ? `L${file.line}${file.column ? `:C${file.column}` : ""}` : undefined,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 }

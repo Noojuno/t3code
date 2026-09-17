@@ -123,7 +123,13 @@ export function useThreadFindHighlights(input: {
         repaint();
       });
     });
-    observer.observe(container, { subtree: true, childList: true, characterData: true });
+    observer.observe(container, {
+      subtree: true,
+      childList: true,
+      characterData: true,
+      attributes: true,
+      attributeFilter: ["data-wrap"],
+    });
     return () => {
       observer.disconnect();
       if (frame !== null) cancelAnimationFrame(frame);

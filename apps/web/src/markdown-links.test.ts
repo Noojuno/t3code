@@ -1,14 +1,16 @@
+import {
+  extractMarkdownLinkHrefs,
+  resolveMarkdownFileLinkTarget,
+} from "@t3tools/shared/markdownLinks";
 import { describe, expect, it } from "vite-plus/test";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import ReactMarkdown from "react-markdown";
 
 import {
-  extractMarkdownLinkHrefs,
   isWindowsDrivePathHref,
   resolveInlineCodeFileLinkMeta,
   resolveMarkdownFileLinkMeta,
-  resolveMarkdownFileLinkTarget,
   rewriteMarkdownFileUriHref,
   shouldOpenMarkdownFileLinkInBrowserByDefault,
   shouldOpenMarkdownFileLinkInEditor,

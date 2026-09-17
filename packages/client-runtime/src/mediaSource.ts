@@ -10,7 +10,7 @@ import {
   fileBasename,
   splitFilePathPosition,
   splitMarkdownLinkSearchAndHash,
-} from "./markdownLinks.ts";
+} from "@t3tools/shared/markdownLinks";
 import {
   mediaFileReference,
   mediaReferenceFileName,

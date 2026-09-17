@@ -6639,6 +6639,7 @@ export default function ChatView(props: ChatViewProps) {
     [composerRef, previewPanelOpen, terminalUiState.terminalOpen],
   );
   const threadFind = useThreadFind({
+    cwd: gitCwd ?? undefined,
     thread: activeThreadRef,
     serverSearch: isServerThread && serverConfig?.threadFind === true,
     content: activeThread,

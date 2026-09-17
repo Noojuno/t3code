@@ -69,3 +69,46 @@ it("excludes repeated legacy attachments containing literal context tags", () =>
     }),
   ).toEqual(["Fix this"]);
 });
+
+const assistantSegments = (text: string, cwd?: string) =>
+  searchableMessageSegments({ role: "assistant", text, streaming: false }, cwd);
+
+it("searches displayed file-chip labels rather than authored labels or paths", () => {
+  expect(
+    assistantSegments("[important description](/tmp/actual.ts). `/tmp/inline-example.ts:42`"),
+  ).toEqual(["actual.ts. inline-example.ts · L42"]);
+  expect(assistantSegments("[label](src/main.ts#L3C2)", "/workspace/repo")).toEqual([
+    "main.ts · L3:C2",
+  ]);
+  expect(assistantSegments("[label](src/main.ts#L3C2)")).toEqual(["label"]);
+});
+
+it("includes the same parent suffixes for duplicate filenames as the renderer", () => {
+  expect(
+    assistantSegments(
+      "[first](src/main.ts) and `/workspace/repo/tests/main.ts:2`",
+      "/workspace/repo",
+    ),
+  ).toEqual(["main.ts · repo/src and main.ts · repo/tests · L2"]);
+  expect(
+    assistantSegments(
+      "[first](src/main.ts) and `/workspace/repo/src/main.ts:2`",
+      "/workspace/repo",
+    ),
+  ).toEqual(["main.ts and main.ts · L2"]);
+});
+
+it("keeps literal file paths in fences and user messages", () => {
+  expect(assistantSegments("```text\n/tmp/file.ts:42\n```")).toEqual(["/tmp/file.ts:42\n"]);
+  expect(
+    searchableMessageSegments({ role: "user", text: "`/tmp/file.ts:42`", streaming: false }),
+  ).toEqual(["/tmp/file.ts:42"]);
+});
+
+it("indexes nested disclosure summaries and bodies in rendered order", () => {
+  expect(
+    assistantSegments(
+      "<details><summary>Outer</summary><p>first</p><details><summary>Inner</summary><p>second</p></details></details>",
+    ),
+  ).toEqual(["Outer", "first", "Inner", "second"]);
+});

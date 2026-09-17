@@ -14,19 +14,24 @@ export interface ThreadFindMatch {
 
 // Message/plan records are immutable and survive timeline rebuilds during streaming.
 // Weak keys reuse parsed text across keystrokes without retaining old messages.
-const entryTextCache = new WeakMap<object, readonly string[] | null>();
+const entryTextCache = new WeakMap<
+  object,
+  { cwd: string | undefined; segments: readonly string[] | null }
+>();
 
-function searchableThreadEntrySegments(entry: TimelineEntry): readonly string[] | null {
+function searchableThreadEntrySegments(
+  entry: TimelineEntry,
+  cwd?: string,
+): readonly string[] | null {
   if (entry.kind !== "message" && entry.kind !== "proposed-plan") return null;
   const key = entry.kind === "message" ? entry.message : entry.proposedPlan;
-  let segments = entryTextCache.get(key);
-  if (segments === undefined) {
-    segments =
-      entry.kind === "message"
-        ? searchableMessageSegments(entry.message)
-        : searchablePlanSegments(entry.proposedPlan.planMarkdown);
-    entryTextCache.set(key, segments);
-  }
+  const cached = entryTextCache.get(key);
+  if (cached && cached.cwd === cwd) return cached.segments;
+  const segments =
+    entry.kind === "message"
+      ? searchableMessageSegments(entry.message, cwd)
+      : searchablePlanSegments(entry.proposedPlan.planMarkdown, cwd);
+  entryTextCache.set(key, { cwd, segments });
   return segments;
 }
 
@@ -44,13 +49,14 @@ function threadEntryTurnId(entry: TimelineEntry): TurnId | null {
 export function buildThreadFindMatches(
   entries: ReadonlyArray<TimelineEntry>,
   query: string,
+  cwd?: string,
 ): ThreadFindMatch[] {
   const normalizedQuery = query.trim();
   if (normalizedQuery.length === 0) return [];
 
   const matches: ThreadFindMatch[] = [];
   for (const entry of entries) {
-    const segments = searchableThreadEntrySegments(entry);
+    const segments = searchableThreadEntrySegments(entry, cwd);
     if (segments === null) continue;
 
     const total = segments.reduce(

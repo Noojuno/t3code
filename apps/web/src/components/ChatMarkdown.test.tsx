@@ -1,3 +1,4 @@
+import { MarkdownFindContext } from "./chat/markdownFindContext";
 import { EnvironmentId } from "@t3tools/contracts";
 import { act, type ComponentProps, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -859,4 +860,64 @@ describe("ChatMarkdown Windows file links", () => {
     expect(html).not.toContain("d:alert");
     expect(html).not.toContain("chat-markdown-file-link");
   });
+});
+
+it("opens nested disclosures for find and restores their prior state when find closes", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  let renderer: ReactTestRenderer | undefined;
+  const render = (searching: boolean) => (
+    <MarkdownFindContext value={searching}>
+      <ChatMarkdown
+        cwd={undefined}
+        text="<details><summary>Outer</summary><details><summary>Inner</summary><p>needle</p></details></details>"
+      />
+    </MarkdownFindContext>
+  );
+  try {
+    await act(async () => {
+      renderer = create(render(false));
+    });
+    expect(JSON.stringify(renderer!.toJSON())).not.toContain("needle");
+    await act(async () => {
+      renderer!.update(render(true));
+    });
+    expect(JSON.stringify(renderer!.toJSON())).toContain("needle");
+    await act(async () => {
+      renderer!.update(render(false));
+    });
+    expect(
+      renderer!.root
+        .findAll(
+          (node) => node.type === "button" && node.props["data-markdown-details-summary"] === "",
+        )
+        .every((node) => node.props["aria-expanded"] === false),
+    ).toBe(true);
+    const trigger = renderer!.root.findAll(
+      (node) => node.type === "button" && node.props["data-markdown-details-summary"] === "",
+    )[0]!;
+    await act(async () => {
+      trigger.props.onClick({ nativeEvent: new Event("click") });
+    });
+    await act(async () => {
+      renderer!.update(render(true));
+    });
+    await act(async () => {
+      renderer!.update(render(false));
+    });
+    expect(
+      renderer!.root.findAllByProps({ "data-markdown-details-open": "true" }).length,
+    ).toBeGreaterThan(0);
+    expect(
+      renderer!.root
+        .findAll(
+          (node) => node.type === "button" && node.props["data-markdown-details-summary"] === "",
+        )
+        .map((node) => node.props["aria-expanded"]),
+    ).toEqual([true, false]);
+  } finally {
+    await act(async () => {
+      renderer?.unmount();
+    });
+    vi.unstubAllGlobals();
+  }
 });

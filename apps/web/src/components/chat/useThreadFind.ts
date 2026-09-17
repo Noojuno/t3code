@@ -21,12 +21,14 @@ const CLOSED_FIND = {
 export function useThreadFind({
   thread,
   serverSearch,
+  cwd,
   content,
   entries,
   history,
 }: {
   thread: ScopedThreadRef | null;
   serverSearch: boolean;
+  cwd: string | undefined;
   content: Pick<OrchestrationThread, "messages" | "proposedPlans"> | undefined;
   entries: ReadonlyArray<TimelineEntry>;
   history: Parameters<typeof useThreadFindHistory>[1];
@@ -66,8 +68,9 @@ export function useThreadFind({
       buildThreadFindMatches(
         entries,
         !serverSearch && isOpen && status !== "loading" ? state.query : "",
+        cwd,
       ),
-    [entries, isOpen, serverSearch, state.query, status],
+    [cwd, entries, isOpen, serverSearch, state.query, status],
   );
   const count = serverSearch ? (remote.data?.totalMatches ?? 0) : localMatches.length;
   const activeIndex = serverSearch

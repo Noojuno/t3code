@@ -1,10 +1,14 @@
-import { ThreadId } from "@t3tools/contracts";
+import * as Schema from "effect/Schema";
+import { ThreadId, OrchestrationMessageContext } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Ref from "effect/Ref";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import { SqlitePersistenceMemory } from "../../persistence/Layers/Sqlite.ts";
 import { makeThreadFindQuery } from "./ThreadFindQuery.ts";
+
+const decodeContext = Schema.decodeUnknownEffect(OrchestrationMessageContext);
+const encodeContext = Schema.encodeEffect(Schema.fromJsonString(OrchestrationMessageContext));
 
 const threadId = ThreadId.make("find-thread");
 const timestamp = "2026-06-01T00:00:00.000Z";
@@ -67,7 +71,7 @@ it.layer(SqlitePersistenceMemory)("ThreadFindQuery", (it) => {
       const { search, message, sql } = yield* setup;
       yield* message("a", "needle", "reasoning");
       yield* message("b", "needle [hidden label](t3-context://v1/terminal/terminal_1)", "user");
-      const context = {
+      const context = yield* decodeContext({
         version: 1,
         records: [
           {
@@ -82,8 +86,9 @@ it.layer(SqlitePersistenceMemory)("ThreadFindQuery", (it) => {
             text: "hidden payload",
           },
         ],
-      };
-      yield* sql`UPDATE projection_thread_messages SET context_json = ${JSON.stringify(context)} WHERE message_id = 'b'`;
+      });
+      const contextJson = yield* encodeContext(context);
+      yield* sql`UPDATE projection_thread_messages SET context_json = ${contextJson} WHERE message_id = 'b'`;
       const result = yield* search({ threadId, query: "needle" });
       assert.equal(result.totalMatches, 1);
       assert.equal(result.match?.sourceId, "b");
@@ -94,6 +99,21 @@ it.layer(SqlitePersistenceMemory)("ThreadFindQuery", (it) => {
       assert.equal(result.messages[0]?.role, "reasoning");
       assert.equal((yield* search({ threadId, query: "hidden" })).totalMatches, 0);
     }),
+  );
+
+  it.effect(
+    "uses the thread workspace to search displayed file chips and invalidate cached labels",
+    () =>
+      Effect.gen(function* () {
+        const { sql, search, message } = yield* setup;
+        yield* message("file", "[important description](src/main.ts#L42) and `/tmp/actual.ts:3`");
+        assert.equal((yield* search({ threadId, query: "important" })).totalMatches, 1);
+        yield* sql`UPDATE projection_threads SET worktree_path = '/workspace/repo' WHERE thread_id = ${threadId}`;
+        assert.equal((yield* search({ threadId, query: "important" })).totalMatches, 0);
+        assert.equal((yield* search({ threadId, query: "main.ts · L42" })).totalMatches, 1);
+        assert.equal((yield* search({ threadId, query: "actual.ts · L3" })).totalMatches, 1);
+        assert.equal((yield* search({ threadId, query: "/tmp/" })).totalMatches, 0);
+      }),
   );
 
   it.effect("preserves substring, punctuation, block boundaries and Unicode matching", () =>

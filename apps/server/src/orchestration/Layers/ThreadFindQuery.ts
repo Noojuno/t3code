@@ -35,7 +35,12 @@ const SourceRow = Schema.Struct({
   createdAt: Schema.String,
 });
 const Cursor = Schema.Struct({ threadId: ThreadId, createdAt: Schema.String, id: Schema.String });
-class SearchKey extends Data.Class<{ threadId: ThreadId; query: string; sequence: number }> {}
+class SearchKey extends Data.Class<{
+  threadId: ThreadId;
+  query: string;
+  sequence: number;
+  cwd: string | undefined;
+}> {}
 interface MatchingDocument {
   source: "message" | "plan";
   sourceId: string;
@@ -69,12 +74,13 @@ export const makeThreadFindQuery = Effect.fn("makeThreadFindQuery")(function* (
       WHERE thread_id = ${threadId} AND (created_at, plan_id) > (${createdAt}, ${id})
       ORDER BY created_at, plan_id LIMIT 128`,
   });
-  const isActive = SqlSchema.findAll({
+  const activeThread = SqlSchema.findAll({
     Request: ThreadId,
-    Result: Schema.Struct({ id: ThreadId }),
+    Result: Schema.Struct({ id: ThreadId, cwd: Schema.NullOr(Schema.String) }),
     execute: (threadId) => sql`
-      SELECT thread_id AS id FROM projection_threads
-      WHERE thread_id = ${threadId} AND deleted_at IS NULL`,
+      SELECT t.thread_id AS id, COALESCE(t.worktree_path, p.workspace_root) AS cwd
+      FROM projection_threads t LEFT JOIN projection_projects p ON p.project_id = t.project_id
+      WHERE t.thread_id = ${threadId} AND t.deleted_at IS NULL`,
   });
   const changed = () =>
     new PersistenceSqlError({
@@ -91,12 +97,15 @@ export const makeThreadFindQuery = Effect.fn("makeThreadFindQuery")(function* (
         for (const row of rows) {
           const segments =
             source === "plan"
-              ? searchablePlanSegments(row.text)
-              : searchableMessageSegments({
-                  ...row,
-                  context: row.context ?? undefined,
-                  streaming: row.streaming === 1,
-                });
+              ? searchablePlanSegments(row.text, key.cwd)
+              : searchableMessageSegments(
+                  {
+                    ...row,
+                    context: row.context ?? undefined,
+                    streaming: row.streaming === 1,
+                  },
+                  key.cwd,
+                );
           const count =
             segments?.reduce(
               (sum, text) => sum + countThreadSearchOccurrences(text, key.query),
@@ -177,10 +186,16 @@ export const makeThreadFindQuery = Effect.fn("makeThreadFindQuery")(function* (
         messages: [],
         proposedPlans: [],
       };
-      if ((yield* isActive(input.threadId)).length === 0) return empty;
+      const thread = (yield* activeThread(input.threadId))[0];
+      if (!thread) return empty;
       const { documents, totalMatches } = yield* Cache.get(
         cache,
-        new SearchKey({ threadId: input.threadId, query: input.query, sequence: threadSequence }),
+        new SearchKey({
+          threadId: input.threadId,
+          query: input.query,
+          sequence: threadSequence,
+          cwd: thread.cwd ?? undefined,
+        }),
       );
       const activeIndex = Math.min(input.index ?? 0, Math.max(0, totalMatches - 1));
       let occurrence = activeIndex;
@@ -201,7 +216,7 @@ export const makeThreadFindQuery = Effect.fn("makeThreadFindQuery")(function* (
           : [];
       if (
         (yield* getSequence(input.threadId)) !== threadSequence ||
-        (yield* isActive(input.threadId)).length === 0
+        (yield* activeThread(input.threadId)).length === 0
       )
         return yield* changed();
       return {
