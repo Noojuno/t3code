@@ -1,3 +1,8 @@
+import {
+  OrchestrationV2SearchThreadError,
+  OrchestrationV2SearchThreadInput,
+  OrchestrationV2SearchThreadResult,
+} from "./orchestrationV2.ts";
 import { OrchestrationDispatchCommandError } from "./orchestrationDispatch.ts";
 import {
   ChatGptReconnectProfileInput,
@@ -1526,6 +1531,12 @@ const WsOrchestrationV2GetFullThreadDiffRpc = Rpc.make(
   },
 );
 
+const WsOrchestrationV2SearchThreadRpc = Rpc.make(ORCHESTRATION_V2_WS_METHODS.searchThread, {
+  payload: OrchestrationV2SearchThreadInput,
+  success: OrchestrationV2SearchThreadResult,
+  error: Schema.Union([OrchestrationV2SearchThreadError, EnvironmentAuthorizationError]),
+});
+
 const WsOrchestrationV2SearchThreadsRpc = Rpc.make(ORCHESTRATION_V2_WS_METHODS.searchThreads, {
   payload: OrchestrationSearchThreadsInput,
   success: OrchestrationSearchThreadsResult,
@@ -1914,6 +1925,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationV2GetTurnDiffRpc,
   WsOrchestrationV2GetFullThreadDiffRpc,
   WsOrchestrationV2SearchThreadsRpc,
+  WsOrchestrationV2SearchThreadRpc,
   WsOrchestrationV2GetArchivedShellSnapshotRpc,
   WsOrchestrationV2GetThreadProjectionRpc,
   WsOrchestrationV2LaunchThreadRpc,

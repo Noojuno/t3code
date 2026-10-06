@@ -1,3 +1,7 @@
+import type {
+  OrchestrationV2SearchThreadInput,
+  OrchestrationV2SearchThreadResult,
+} from "@t3tools/contracts";
 import {
   latestExecutedRun,
   latestRootProviderFailure,
@@ -280,6 +284,9 @@ export interface OrchestratorV2Shape {
   readonly dispatch: (
     command: OrchestrationV2ServerCommand,
   ) => Effect.Effect<OrchestratorV2DispatchResult, OrchestratorV2Error>;
+  readonly searchThread: (
+    input: OrchestrationV2SearchThreadInput,
+  ) => Effect.Effect<OrchestrationV2SearchThreadResult, OrchestratorV2Error>;
   readonly getTimelinePage: (
     threadId: ThreadId,
     options: ProjectionTimelinePageOptions,
@@ -10800,6 +10807,14 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     recoverDelegatedTask,
     delegatedTaskResultPending,
     dispatch: dispatchWithReceipt,
+    searchThread: (input) =>
+      projectionStore
+        .searchThread(input)
+        .pipe(
+          Effect.mapError(
+            (cause) => new OrchestratorProjectionError({ threadId: input.threadId, cause }),
+          ),
+        ),
     getTimelinePage: (threadId, options) =>
       projectionStore
         .getTimelinePage(threadId, options)
@@ -10935,6 +10950,8 @@ const layerUnavailable: Layer.Layer<OrchestratorV2> = Layer.succeed(
           cause: "Orchestration V2 live runtime is not configured.",
         }),
       ),
+    searchThread: (input) =>
+      Effect.fail(new OrchestratorProjectionError({ threadId: input.threadId })),
     getTimelinePage: (threadId) => Effect.fail(new OrchestratorProjectionError({ threadId })),
     getMessageCount: (threadId) => Effect.fail(new OrchestratorProjectionError({ threadId })),
     getTurnItem: ({ threadId }) => Effect.fail(new OrchestratorProjectionError({ threadId })),

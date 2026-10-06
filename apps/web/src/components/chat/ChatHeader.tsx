@@ -17,6 +17,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ReactNode,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
 } from "react";
@@ -39,6 +40,7 @@ import {
 import { cn } from "~/lib/utils";
 
 interface ChatHeaderProps {
+  findBar: import("react").ReactNode;
   activeThreadEnvironmentId: EnvironmentId;
   activeThreadId: ThreadId;
   activeThreadTitle: string;
@@ -72,6 +74,7 @@ export function resolveRenameCommit(input: {
 // opens immediately.
 const TITLE_MENU_OPEN_DELAY_MS = 500;
 export const ChatHeader = memo(function ChatHeader({
+  findBar,
   activeThreadEnvironmentId,
   activeThreadId,
   activeThreadTitle,
@@ -254,7 +257,7 @@ export const ChatHeader = memo(function ChatHeader({
   return (
     <div
       className={cn(
-        "flex min-w-0 flex-1 items-center gap-2 sm:gap-3",
+        "relative flex min-w-0 flex-1 items-center gap-2 sm:gap-3",
         rightPanelOpen ? "pr-10" : "pr-24",
       )}
       onContextMenu={handleHeaderContextMenu}
@@ -355,6 +358,7 @@ export const ChatHeader = memo(function ChatHeader({
           )}
         </WorkspaceBreadcrumbItem>
       </WorkspaceBreadcrumb>
+      {findBar}
     </div>
   );
 });

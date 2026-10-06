@@ -1,0 +1,251 @@
+import { MessageId, RunId, PlanId } from "@t3tools/contracts";
+import { describe, expect, it } from "vite-plus/test";
+import type { TimelineEntry } from "../../session-logic";
+import { deriveMessagesTimelineRows } from "./MessagesTimeline.logic";
+import {
+  buildThreadFindMatches,
+  clampThreadFindIndex,
+  formatThreadFindCount,
+  stepThreadFindIndex,
+} from "./threadFind";
+
+const CREATED_AT = "2026-01-01T00:00:00.000Z";
+
+function messageEntry(
+  id: string,
+  role: "user" | "assistant" | "system",
+  text: string,
+  runId: RunId | null = null,
+): TimelineEntry {
+  return {
+    id,
+    kind: "message",
+    createdAt: CREATED_AT,
+    message: {
+      id: MessageId.make(id),
+      role,
+      text,
+      runId,
+      streaming: false,
+      createdAt: CREATED_AT,
+      updatedAt: CREATED_AT,
+    },
+  };
+}
+
+function workEntry(id: string): TimelineEntry {
+  return {
+    id,
+    kind: "work",
+    createdAt: CREATED_AT,
+    entry: {
+      id,
+      label: "deploy sentinel",
+      tone: "tool",
+      createdAt: CREATED_AT,
+    },
+  };
+}
+
+function proposedPlanEntry(id: string, planMarkdown: string, runId: RunId | null): TimelineEntry {
+  return {
+    id,
+    kind: "proposed-plan",
+    createdAt: CREATED_AT,
+    proposedPlan: {
+      id: PlanId.make(id),
+      runId,
+      planMarkdown,
+      status: "active",
+      createdAt: CREATED_AT,
+      updatedAt: CREATED_AT,
+    },
+  };
+}
+
+describe("searchable thread entries", () => {
+  it("searches displayed user text without appended context payloads", () => {
+    const prompt = [
+      "check the build",
+      "",
+      "<terminal_context>",
+      "- Terminal 1 line 12:",
+      "  secret sentinel output",
+      "</terminal_context>",
+    ].join("\n");
+
+    const entries = [messageEntry("m1", "user", prompt)];
+    expect(buildThreadFindMatches(entries, "check the build")).toHaveLength(1);
+    expect(buildThreadFindMatches(entries, "sentinel")).toHaveLength(0);
+  });
+
+  it("excludes terminal labels that render as non-searchable chips", () => {
+    const prompt = [
+      "check @terminal-1:12",
+      "",
+      "<terminal_context>",
+      "- Terminal 1 line 12:",
+      "  12 | output",
+      "</terminal_context>",
+    ].join("\n");
+
+    const entries = [messageEntry("m1", "user", prompt)];
+    expect(buildThreadFindMatches(entries, "check")).toHaveLength(1);
+    expect(buildThreadFindMatches(entries, "@terminal-1:12")).toHaveLength(0);
+  });
+
+  it("keeps repeated terminal labels that are still visible after the chip", () => {
+    const prompt =
+      "check @terminal-1:12 and @terminal-1:12\n\n<terminal_context>\n- Terminal 1 line 12:\n  12 | output\n</terminal_context>";
+    expect(
+      buildThreadFindMatches([messageEntry("m1", "user", prompt)], "@terminal-1:12"),
+    ).toHaveLength(1);
+  });
+
+  it("excludes terminal chips even when their labels are out of context order", () => {
+    const prompt =
+      "@terminal-2:12 then @terminal-1:12\n\n<terminal_context>\n- Terminal 1 line 12:\n  12 | first\n- Terminal 2 line 12:\n  12 | second\n</terminal_context>";
+    expect(buildThreadFindMatches([messageEntry("m1", "user", prompt)], "@terminal-")).toHaveLength(
+      0,
+    );
+  });
+
+  it.each(["user", "assistant"] as const)(
+    "searches rendered %s Markdown, not link destinations or formatting",
+    (role) => {
+      const entries = [
+        messageEntry(
+          "m1",
+          role,
+          "[documentation](https://hidden.example/path) foo**bar** and `inline code`",
+        ),
+      ];
+      expect(buildThreadFindMatches(entries, "hidden.example")).toHaveLength(0);
+      expect(buildThreadFindMatches(entries, "documentation")).toHaveLength(1);
+      expect(buildThreadFindMatches(entries, "foobar")).toHaveLength(1);
+      expect(buildThreadFindMatches(entries, "inline code")).toHaveLength(1);
+    },
+  );
+
+  it("searches code, escaped punctuation, entities and sanitized HTML as displayed", () => {
+    const entries = [
+      messageEntry(
+        "m1",
+        "assistant",
+        "```ts\nconst value = 1;\n```\n\n\\*literal\\* &amp; <strong>bold</strong><script>hidden</script>",
+      ),
+    ];
+    for (const query of ["const value", "*literal* & bold"]) {
+      expect(buildThreadFindMatches(entries, query)).toHaveLength(1);
+    }
+    for (const query of ["hidden", "strong", "```ts"]) {
+      expect(buildThreadFindMatches(entries, query)).toHaveLength(0);
+    }
+  });
+
+  it("preserves literal HTML in user messages", () => {
+    expect(
+      buildThreadFindMatches([messageEntry("m1", "user", "<strong>bold</strong>")], "<strong>"),
+    ).toHaveLength(1);
+  });
+
+  it("searches plan titles before body matches, including the default title", () => {
+    const entries = [proposedPlanEntry("p1", "# Release\n\n## Summary\n\nRelease **ready**", null)];
+    expect(buildThreadFindMatches(entries, "Release").map((match) => match.occurrence)).toEqual([
+      0, 1,
+    ]);
+    expect(buildThreadFindMatches(entries, "Summary")).toHaveLength(0);
+    expect(
+      buildThreadFindMatches([proposedPlanEntry("p2", "Body", null)], "Proposed plan"),
+    ).toHaveLength(1);
+  });
+
+  it("does not join separate blocks or the plan title and body into a phrase", () => {
+    expect(
+      buildThreadFindMatches([messageEntry("m1", "assistant", "first\n\nsecond")], "firstsecond"),
+    ).toHaveLength(0);
+    expect(
+      buildThreadFindMatches([proposedPlanEntry("p1", "# first\n\nsecond", null)], "firstsecond"),
+    ).toHaveLength(0);
+  });
+
+  it("indexes the rendered placeholder for empty assistant responses", () => {
+    expect(
+      buildThreadFindMatches([messageEntry("m1", "assistant", "")], "(empty response)"),
+    ).toHaveLength(1);
+  });
+
+  it("skips work rows and system messages", () => {
+    expect(
+      buildThreadFindMatches(
+        [workEntry("w1"), messageEntry("s1", "system", "sentinel")],
+        "sentinel",
+      ),
+    ).toHaveLength(0);
+  });
+
+  it("uses the displayed proposed-plan title and body", () => {
+    const entries = [proposedPlanEntry("p1", "# Visible title\n\n## Summary\n\nship it", null)];
+    expect(buildThreadFindMatches(entries, "Visible title")).toHaveLength(1);
+    expect(buildThreadFindMatches(entries, "ship it")).toHaveLength(1);
+    expect(buildThreadFindMatches(entries, "Summary")).toHaveLength(0);
+  });
+});
+
+describe("buildThreadFindMatches", () => {
+  it("carries turn ownership for folded messages and plans", () => {
+    const runId = RunId.make("turn-1");
+    const entries = [
+      messageEntry("m1", "assistant", "deploy twice: deploy", runId),
+      proposedPlanEntry("p1", "deploy the plan", runId),
+    ];
+
+    expect(buildThreadFindMatches(entries, "deploy")).toEqual([
+      { entryId: "m1", runId, occurrence: 0 },
+      { entryId: "m1", runId, occurrence: 1 },
+      { entryId: "p1", runId, occurrence: 0 },
+    ]);
+  });
+
+  it("reveals a search result inside a settled turn and restores its fold afterward", () => {
+    const runId = RunId.make("settled-turn");
+    const entries = [
+      messageEntry("prompt", "user", "Check the release"),
+      messageEntry("progress", "assistant", "Found the sentinel", runId),
+      messageEntry("final", "assistant", "Done", runId),
+    ];
+    const input = {
+      timelineEntries: entries,
+      isWorking: false,
+      activeTurnStartedAt: null,
+      turnDiffSummaries: [],
+      supportsConversationRollback: false,
+    };
+    const collapsed = deriveMessagesTimelineRows(input);
+    expect(collapsed.some((row) => row.id === "progress")).toBe(false);
+
+    const match = buildThreadFindMatches(entries, "sentinel")[0]!;
+    const expanded = deriveMessagesTimelineRows({
+      ...input,
+      expandedRunIds: new Set(match.runId ? [match.runId] : []),
+    });
+    expect(expanded.some((row) => row.id === match.entryId)).toBe(true);
+    expect(deriveMessagesTimelineRows(input).map((row) => row.id)).toEqual(
+      collapsed.map((row) => row.id),
+    );
+  });
+
+  it("ignores blank queries", () => {
+    expect(buildThreadFindMatches([messageEntry("m1", "user", "deploy")], "   ")).toEqual([]);
+  });
+});
+
+describe("thread find navigation", () => {
+  it("clamps, wraps, and formats positions", () => {
+    expect(clampThreadFindIndex(4, 2)).toBe(1);
+    expect(stepThreadFindIndex(2, 3, 1)).toBe(0);
+    expect(stepThreadFindIndex(0, 3, -1)).toBe(2);
+    expect(formatThreadFindCount(4, 2)).toBe("2/2");
+    expect(formatThreadFindCount(0, 0)).toBe("0/0");
+  });
+});

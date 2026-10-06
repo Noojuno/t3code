@@ -1,3 +1,5 @@
+import { useThreadFind } from "./chat/useThreadFind";
+import { ThreadFindBar } from "./chat/ThreadFindBar";
 import { ChatCanvas } from "./chat/ChatCanvas";
 import { usageLimitRecoveryBannerItem } from "./chat/UsageLimitRecoveryBanner";
 import {
@@ -608,7 +610,7 @@ import {
 const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_PROVIDER_MODELS: ServerProvider["models"] = [];
 const EMPTY_USAGE_LIMIT_SOURCES: UsageLimitSourceSnapshots = [];
-import type { CodexArtifactTemplate } from "@t3tools/client-runtime/codex-artifact-templates";
+import type { CodexArtifactTemplate } from "@t3tools/shared/codexArtifactTemplates";
 
 const TIMELINE_SCROLL_CANCEL_SENTINEL = Object.freeze({});
 const EMPTY_FEEDBACK_SUBMISSIONS: ReadonlyArray<CodexFeedbackSubmission> = [];
@@ -7902,11 +7904,36 @@ export default function ChatView(props: ChatViewProps) {
     }),
     [composerRef, previewPanelOpen, terminalUiState.terminalOpen, routeKind, phase],
   );
+  const threadFind = useThreadFind({
+    cwd: gitCwd ?? undefined,
+    thread: activeThreadRef,
+    serverSearch: isServerThread && serverConfig?.threadFind === true,
+    content: serverProjection ?? undefined,
+    entries: timelineEntries,
+    history: threadHistoryControls
+      ? {
+          loading: threadHistoryControls.loading,
+          cursor: serverThreadHistory.historyCursor,
+          onLoadEarlier: () => {
+            threadHistoryControls.onLoadEarlier();
+            return true;
+          },
+        }
+      : null,
+  });
+  const { isOpen: isThreadFindActive, open: openThreadFind, close: closeThreadFind } = threadFind;
 
   useEffect(() => {
     const handler = (event: globalThis.KeyboardEvent) => {
       if (preventRepeatedTerminalCloseShortcut(event, keybindings)) {
         event.stopPropagation();
+        return;
+      }
+      if (isThreadFindActive && event.key === "Escape") {
+        event.preventDefault();
+        event.stopPropagation();
+        closeThreadFind();
+        focusComposer();
         return;
       }
       if (isTerminalCloseConfirmPending() && preventTerminalCloseShortcut(event, keybindings)) {
@@ -7997,6 +8024,13 @@ export default function ChatView(props: ChatViewProps) {
         event.preventDefault();
         event.stopPropagation();
         toggleTerminalVisibility();
+        return;
+      }
+
+      if (command === "chat.find") {
+        event.preventDefault();
+        event.stopPropagation();
+        openThreadFind();
         return;
       }
 
@@ -8219,6 +8253,9 @@ export default function ChatView(props: ChatViewProps) {
     confirmAndUnpinThread,
     copyActiveThreadReference,
     getShortcutContext,
+    openThreadFind,
+    closeThreadFind,
+    isThreadFindActive,
     toggleRightPanel,
     toggleThreadPanel,
     toggleTerminalVisibility,
@@ -11209,6 +11246,7 @@ export default function ChatView(props: ChatViewProps) {
             activeThreadTitle={activeThread.title}
             activeProject={activeProject ?? null}
             rightPanelOpen={inlineRightPanelOwnsTitleBar}
+            findBar={<ThreadFindBar {...threadFind.barProps} />}
             onNewThreadInProject={handleNewThreadInActiveProject}
             {...(activeDraftLogicalProjectKey
               ? { onOpenProjectSettings: handleOpenDraftProjectSettings }
@@ -11291,6 +11329,7 @@ export default function ChatView(props: ChatViewProps) {
                 isPreparingWorktree={!paintOnlyDisplayedTimeline && isPreparingWorktree}
                 footer={paintOnlyDisplayedTimeline ? null : threadStatusLine}
                 listRef={legendListRef}
+                {...(!paintOnlyDisplayedTimeline ? threadFind.timelineProps : {})}
                 timelineEntries={displayedTimeline.entries}
                 providerStatuses={
                   environmentById.get(
@@ -11365,7 +11404,7 @@ export default function ChatView(props: ChatViewProps) {
               />
 
               {/* scroll to end pill — shown when user has scrolled away from the live edge */}
-              {showScrollToBottom && (
+              {showScrollToBottom && threadFind.timelineProps.searchEntries === null && (
                 <div
                   className="chat-scroll-to-bottom pointer-events-none absolute z-30 flex justify-center py-1.5"
                   style={{ bottom: scrollToEndClearance + 4 }}

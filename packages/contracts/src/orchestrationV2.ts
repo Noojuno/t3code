@@ -3137,6 +3137,7 @@ export const ORCHESTRATION_V2_WS_METHODS = {
   getTurnDiff: "orchestration.getTurnDiff",
   getFullThreadDiff: "orchestration.getFullThreadDiff",
   searchThreads: "orchestration.searchThreads",
+  searchThread: "orchestration.searchThread",
   getArchivedShellSnapshot: "orchestration.getArchivedShellSnapshot",
   getThreadProjection: "orchestration.getThreadProjection",
   getWorkflowScript: "orchestration.getWorkflowScript",
@@ -3484,7 +3485,42 @@ export class OrchestrationGetWorkflowScriptError extends Schema.TaggedError<Orch
   }
 }
 
+export const OrchestrationV2SearchThreadInput = Schema.Struct({
+  threadId: ThreadId,
+  query: TrimmedNonEmptyString.check(Schema.isMaxLength(200)),
+  index: Schema.optionalKey(NonNegativeInt),
+});
+export type OrchestrationV2SearchThreadInput = typeof OrchestrationV2SearchThreadInput.Type;
+
+export const OrchestrationV2ThreadFindMatch = Schema.Struct({
+  entryId: TrimmedNonEmptyString,
+  runId: Schema.NullOr(RunId),
+  occurrence: NonNegativeInt,
+});
+export const OrchestrationV2SearchThreadResult = Schema.Struct({
+  snapshotSequence: NonNegativeInt,
+  totalMatches: NonNegativeInt,
+  activeIndex: NonNegativeInt,
+  match: Schema.NullOr(OrchestrationV2ThreadFindMatch),
+  // Search context is separate from the client's contiguous history pages.
+  items: Schema.Array(OrchestrationV2ProjectedTurnItem),
+});
+export type OrchestrationV2SearchThreadResult = typeof OrchestrationV2SearchThreadResult.Type;
+
+export class OrchestrationV2SearchThreadError extends Schema.TaggedError<OrchestrationV2SearchThreadError>()(
+  "OrchestrationV2SearchThreadError",
+  { cause: Schema.Defect() },
+) {
+  override get message(): string {
+    return "Could not search this thread. Please retry.";
+  }
+}
+
 export const OrchestrationV2RpcSchemas = {
+  searchThread: {
+    input: OrchestrationV2SearchThreadInput,
+    output: OrchestrationV2SearchThreadResult,
+  },
   dispatchCommand: {
     input: OrchestrationV2Command,
     output: OrchestrationV2DispatchCommandResult,

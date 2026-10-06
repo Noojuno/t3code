@@ -68,6 +68,7 @@ import {
   SunIcon,
   TextSearchIcon,
 } from "lucide-react";
+import { requestThreadFindOpen } from "./chat/threadFindActionBus";
 import {
   useCallback,
   useDeferredValue,
@@ -1926,6 +1927,20 @@ function OpenCommandPaletteDialog(props: {
       icon: <MessageSquareDashedIcon className={ITEM_ICON_CLASS} />,
       shortcutCommand: "chat.newWithoutProject",
       run: () => startScratchThread(scratchTargetEnvironmentId),
+    });
+  }
+
+  if (activeThreadId) {
+    actionItems.push({
+      kind: "action",
+      value: "find-current-thread",
+      title: "Find in current thread",
+      searchTerms: ["find", "search", "messages", "plans"],
+      icon: <TextSearchIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "chat.find",
+      run: async () => {
+        requestThreadFindOpen();
+      },
     });
   }
 

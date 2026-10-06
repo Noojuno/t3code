@@ -1,3 +1,8 @@
+import { makeThreadFind, findProjectedThreadItems } from "./ThreadFind.ts";
+import type {
+  OrchestrationV2SearchThreadInput,
+  OrchestrationV2SearchThreadResult,
+} from "@t3tools/contracts";
 import {
   latestRootProviderFailure,
   latestUnheldRun,
@@ -308,6 +313,9 @@ export interface ProjectionTimelinePage {
 }
 
 export interface ProjectionStoreV2Shape {
+  readonly searchThread: (
+    input: OrchestrationV2SearchThreadInput,
+  ) => Effect.Effect<OrchestrationV2SearchThreadResult, ProjectionStoreV2Error>;
   readonly getThreadAttachmentIds: (
     threadId: ThreadId,
   ) => Effect.Effect<ReadonlyArray<string>, ProjectionStoreV2Error>;
@@ -4787,6 +4795,10 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         ),
       );
 
+    const searchThread = yield* makeThreadFind((threadId) =>
+      readTimelineIndex(threadId, new Set()).pipe(Effect.map((index) => index.visible)),
+    );
+
     const getTimelinePage: ProjectionStoreV2Shape["getTimelinePage"] = (threadId, options) =>
       sql
         .withTransaction(
@@ -5701,6 +5713,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       getThreadSnapshot,
       getThreadSnapshotWindow,
       getTimelinePage,
+      searchThread,
       getThreadAttachmentIds,
     } satisfies ProjectionStoreV2Shape;
   }),
@@ -6257,6 +6270,18 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
             ),
           ),
         ),
+      searchThread: (input) =>
+        service
+          .getThreadSnapshot(input.threadId)
+          .pipe(
+            Effect.map((snapshot) =>
+              findProjectedThreadItems(
+                snapshot.projection.visibleTurnItems,
+                input,
+                snapshot.snapshotSequence,
+              ),
+            ),
+          ),
       getTimelinePage: (threadId, options) =>
         service.getThreadProjection(threadId).pipe(
           Effect.map((projection) => {

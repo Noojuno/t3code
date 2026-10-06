@@ -1,4 +1,8 @@
 import type {
+  OrchestrationV2SearchThreadInput,
+  OrchestrationV2SearchThreadResult,
+} from "@t3tools/contracts";
+import type {
   ProjectionRecordField,
   ProjectionRecordFilter,
   ProjectionRecords,
@@ -271,6 +275,9 @@ export type ThreadManagementError = typeof ThreadManagementError.Type;
 type ThreadManagementFailure = ThreadManagementError | Orchestrator.OrchestratorV2Error;
 
 export interface ThreadManagementServiceShape {
+  readonly searchThread: (
+    input: OrchestrationV2SearchThreadInput,
+  ) => Effect.Effect<OrchestrationV2SearchThreadResult, Orchestrator.OrchestratorV2Error>;
   readonly ensureLegacyTranscript: (
     threadId: ThreadId,
   ) => Effect.Effect<void, LegacyV1ThreadImporter.LegacyV1ThreadImportError>;
@@ -793,6 +800,10 @@ const make = Effect.gen(function* () {
 
   return ThreadManagementService.of({
     ensureLegacyTranscript,
+    searchThread: (input) =>
+      ensureProjectionTranscript(input.threadId).pipe(
+        Effect.andThen(orchestrator.searchThread(input)),
+      ),
     dispatch,
     getTimelinePage: (threadId, options) =>
       ensureProjectionTranscript(threadId).pipe(

@@ -1,3 +1,4 @@
+import { proposedPlanTitle, stripDisplayedPlanMarkdown } from "@t3tools/shared/proposedPlanText";
 import { memo, useState, useId } from "react";
 import {
   isAtomCommandInterrupted,
@@ -13,8 +14,6 @@ import {
   buildProposedPlanMarkdownFilename,
   downloadPlanAsTextFile,
   normalizePlanMarkdownForExport,
-  proposedPlanTitle,
-  stripDisplayedPlanMarkdown,
 } from "../../proposedPlan";
 import ChatMarkdown from "../ChatMarkdown";
 import { EllipsisIcon } from "lucide-react";
@@ -44,12 +43,14 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
   threadRef,
   cwd,
   workspaceRoot,
+  expandForFind = false,
 }: {
   planMarkdown: string;
   environmentId: EnvironmentId;
   threadRef?: ScopedThreadRef | undefined;
   cwd: string | undefined;
   workspaceRoot: string | undefined;
+  expandForFind?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
   const canWriteFiles = useEnvironmentScope(environmentId, AuthFilesystemWriteScope);
@@ -79,6 +80,7 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
   const collapsedPreview = canCollapse
     ? buildCollapsedProposedPlanPreviewMarkdown(planMarkdown, { maxLines: 10 })
     : null;
+  const isCollapsed = canCollapse && !expanded && !expandForFind;
   const downloadFilename = buildProposedPlanMarkdownFilename(planMarkdown);
   const saveContents = normalizePlanMarkdownForExport(planMarkdown);
 
@@ -159,7 +161,9 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
           <Badge variant="secondary">Plan</Badge>
           {/* Same heading level as the message author headings in the timeline,
               so a plan's own headings nest beneath it in the outline. */}
-          <h3 className="truncate text-sm font-medium text-foreground">{title}</h3>
+          <h3 data-thread-find-text="true" className="truncate text-sm font-medium text-foreground">
+            {title}
+          </h3>
         </div>
         <Menu>
           <MenuTrigger
@@ -182,8 +186,11 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
         </Menu>
       </div>
       <div className="mt-4">
-        <div className={cn("relative", canCollapse && !expanded && "max-h-104 overflow-hidden")}>
-          {canCollapse && !expanded ? (
+        <div
+          className={cn("relative", isCollapsed && "max-h-104 overflow-hidden")}
+          data-thread-find-text="true"
+        >
+          {isCollapsed ? (
             <ChatMarkdown
               text={collapsedPreview ?? ""}
               cwd={cwd}
@@ -202,11 +209,11 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
               headingLevelOffset={3}
             />
           )}
-          {canCollapse && !expanded ? (
+          {isCollapsed ? (
             <div className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-linear-to-t from-card/95 via-card/80 to-transparent" />
           ) : null}
         </div>
-        {canCollapse ? (
+        {canCollapse && !expandForFind ? (
           <div className="mt-4 flex justify-center">
             <Button
               size="sm"
