@@ -7909,18 +7909,9 @@ export default function ChatView(props: ChatViewProps) {
     : EMPTY_PROVIDER_SKILLS;
   const threadFind = useThreadFind({
     skills: timelineSkills,
-    cwd: gitCwd ?? undefined,
     thread: activeThreadRef,
-    serverSearch: isServerThread && serverConfig?.threadFind === true,
+    enabled: isServerThread && serverConfig?.threadFind === true,
     content: serverProjection ?? undefined,
-    entries: timelineEntries,
-    history: threadHistoryControls
-      ? {
-          loading: threadHistoryControls.loading,
-          cursor: serverThreadHistory.historyCursor,
-          onLoadEarlier: threadHistoryControls.onLoadEarlier,
-        }
-      : null,
   });
   const { isOpen: isThreadFindActive, open: openThreadFind, close: closeThreadFind } = threadFind;
 

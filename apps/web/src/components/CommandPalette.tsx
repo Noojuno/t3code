@@ -1140,6 +1140,9 @@ function OpenCommandPaletteDialog(props: {
   );
 
   const activeThreadId = activeThread?.id;
+  const supportsThreadFind =
+    environments.find((environment) => environment.environmentId === activeThread?.environmentId)
+      ?.serverConfig?.threadFind === true;
   const currentProjectEnvironmentId =
     activeThread?.environmentId ?? activeDraftThread?.environmentId ?? null;
   const currentProjectId = activeThread?.projectId ?? activeDraftThread?.projectId ?? null;
@@ -1930,7 +1933,7 @@ function OpenCommandPaletteDialog(props: {
     });
   }
 
-  if (activeThreadId) {
+  if (activeThreadId && supportsThreadFind) {
     actionItems.push({
       kind: "action",
       value: "find-current-thread",

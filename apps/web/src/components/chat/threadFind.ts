@@ -1,8 +1,4 @@
-import type { InlineSkill } from "@t3tools/shared/inlineSkills";
 import type { RunId } from "@t3tools/contracts";
-import { countThreadSearchOccurrences } from "@t3tools/shared/threadSearch";
-import type { TimelineEntry } from "../../session-logic";
-import { searchableMessageSegments, searchablePlanSegments } from "@t3tools/shared/threadFindText";
 
 /** One occurrence of the query inside a searchable timeline entry. */
 export interface ThreadFindMatch {
@@ -13,66 +9,7 @@ export interface ThreadFindMatch {
   readonly occurrence: number;
 }
 
-// Message/plan records are immutable and survive timeline rebuilds during streaming.
-// Weak keys reuse parsed text across keystrokes without retaining old messages.
-const entryTextCache = new WeakMap<
-  object,
-  { cwd: string | undefined; skills: readonly InlineSkill[]; segments: readonly string[] | null }
->();
-
-function searchableThreadEntrySegments(
-  entry: TimelineEntry,
-  cwd?: string,
-  skills: readonly InlineSkill[] = [],
-): readonly string[] | null {
-  if (entry.kind !== "message" && entry.kind !== "proposed-plan") return null;
-  const key = entry.kind === "message" ? entry.message : entry.proposedPlan;
-  const cached = entryTextCache.get(key);
-  if (cached && cached.cwd === cwd && cached.skills === skills) return cached.segments;
-  const segments =
-    entry.kind === "message"
-      ? searchableMessageSegments(entry.message, cwd, skills)
-      : searchablePlanSegments(entry.proposedPlan.planMarkdown, cwd, skills);
-  entryTextCache.set(key, { cwd, skills, segments });
-  return segments;
-}
-
-function threadEntryRunId(entry: TimelineEntry): RunId | null {
-  if (entry.kind === "message") return entry.message.runId ?? null;
-  if (entry.kind === "proposed-plan") return entry.proposedPlan.runId;
-  return null;
-}
-
-export function buildThreadFindMatches(
-  entries: ReadonlyArray<TimelineEntry>,
-  query: string,
-  cwd?: string,
-  skills: readonly InlineSkill[] = [],
-): ThreadFindMatch[] {
-  const normalizedQuery = query.trim();
-  if (normalizedQuery.length === 0) return [];
-
-  const matches: ThreadFindMatch[] = [];
-  for (const entry of entries) {
-    const segments = searchableThreadEntrySegments(entry, cwd, skills);
-    if (segments === null) continue;
-
-    const total = segments.reduce(
-      (count, text) => count + countThreadSearchOccurrences(text, normalizedQuery),
-      0,
-    );
-    for (let occurrence = 0; occurrence < total; occurrence += 1) {
-      matches.push({
-        entryId: entry.id,
-        runId: threadEntryRunId(entry),
-        occurrence,
-      });
-    }
-  }
-  return matches;
-}
-
-export function clampThreadFindIndex(index: number, total: number): number {
+function clampThreadFindIndex(index: number, total: number): number {
   if (total <= 0 || !Number.isFinite(index) || index < 0) return 0;
   return Math.min(Math.trunc(index), total - 1);
 }

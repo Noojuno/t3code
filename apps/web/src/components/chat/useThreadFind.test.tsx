@@ -12,16 +12,17 @@ import {
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import { useThreadFind } from "./useThreadFind";
+import { orchestrationEnvironment } from "~/state/orchestration";
+import { requestThreadFindOpen } from "./threadFindActionBus";
 
 const queries = vi.hoisted(() => ({
   results: new Map<string, OrchestrationV2SearchThreadResult>(),
 }));
 vi.mock("~/state/orchestration", () => ({
   orchestrationEnvironment: {
-    threadFind: (input: {
-      environmentId: EnvironmentId;
-      input: OrchestrationV2SearchThreadInput;
-    }) => input,
+    threadFind: vi.fn(
+      (input: { environmentId: EnvironmentId; input: OrchestrationV2SearchThreadInput }) => input,
+    ),
   },
 }));
 vi.mock("~/state/queries", () => ({ useDebouncedValue: <T,>(value: T) => value }));
@@ -34,6 +35,8 @@ vi.mock("~/state/query", () => ({
   }),
 }));
 
+vi.mock("../ui/toast", () => ({ toastManager: { add: vi.fn() } }));
+
 let renderer: ReactTestRenderer | undefined;
 let find: ReturnType<typeof useThreadFind>;
 const a = EnvironmentId.make("environment:a");
@@ -41,15 +44,17 @@ const b = EnvironmentId.make("environment:b");
 const threadId = ThreadId.make("shared-thread");
 const runId = RunId.make("run:plan");
 const now = DateTime.makeUnsafe("2026-10-01T00:00:00Z");
-const entries: Parameters<typeof useThreadFind>[0]["entries"] = [];
-function Probe({ environmentId }: { environmentId: EnvironmentId }) {
+function Probe({
+  environmentId,
+  enabled = true,
+}: {
+  environmentId: EnvironmentId;
+  enabled?: boolean;
+}) {
   const state = useThreadFind({
     thread: { environmentId, threadId },
-    serverSearch: true,
-    cwd: "/repo",
+    enabled,
     content: undefined,
-    entries,
-    history: null,
   });
   useLayoutEffect(() => {
     find = state;
@@ -64,10 +69,47 @@ afterEach(async () => {
   if (renderer) await act(async () => renderer?.unmount());
   renderer = undefined;
   queries.results.clear();
+  vi.clearAllMocks();
   vi.unstubAllGlobals();
 });
 
 describe("V2 find state", () => {
+  it("keeps search unavailable when the server does not support it", async () => {
+    await act(async () => {
+      renderer = create(<Probe environmentId={a} enabled={false} />);
+    });
+    await act(async () => {
+      find.open();
+      requestThreadFindOpen();
+    });
+    expect(find.isOpen).toBe(false);
+    expect(find.timelineProps.searchEntries).toBeNull();
+    expect(orchestrationEnvironment.threadFind).not.toHaveBeenCalled();
+  });
+
+  it("closes search when support disappears without restoring stale queries", async () => {
+    await act(async () => {
+      renderer = create(<Probe environmentId={a} />);
+    });
+    await act(async () => find.open());
+    await act(async () => find.barProps.onQueryChange("needle"));
+    expect(find.isOpen).toBe(true);
+    vi.mocked(orchestrationEnvironment.threadFind).mockClear();
+    await act(async () => {
+      renderer?.update(<Probe environmentId={a} enabled={false} />);
+    });
+    expect(find.isOpen).toBe(false);
+    expect(find.timelineProps.searchEntries).toBeNull();
+    expect(find.timelineProps.findQuery).toBe("");
+    expect(orchestrationEnvironment.threadFind).not.toHaveBeenCalled();
+    await act(async () => {
+      renderer?.update(<Probe environmentId={a} />);
+    });
+    expect(find.isOpen).toBe(false);
+    await act(async () => find.open());
+    expect(find.barProps.query).toBe("");
+  });
+
   it("derives a plan result with the timeline item ID and run ownership", async () => {
     queries.results.set(a, {
       snapshotSequence: 9,

@@ -9,8 +9,8 @@ interface ThreadFindBarProps {
   readonly open: boolean;
   readonly query: string;
   readonly matchCount: number;
-  readonly historyState: "loading" | "incomplete" | "error" | null;
-  readonly onRetryHistory: () => void;
+  readonly status: "loading" | "error" | null;
+  readonly onRetry: () => void;
   readonly activeIndex: number;
   readonly focusRequestId: number;
   readonly onQueryChange: (query: string) => void;
@@ -31,15 +31,14 @@ export function ThreadFindBar(props: ThreadFindBarProps) {
   if (!props.open) return null;
 
   const hasQuery = props.query.trim().length > 0;
-  const noResults = hasQuery && !props.historyState && props.matchCount === 0;
+  const noResults = hasQuery && !props.status && props.matchCount === 0;
   let label = "";
   if (hasQuery) {
     label = formatThreadFindCount(props.activeIndex, props.matchCount);
-    if (props.historyState === "incomplete") label += " (partial)";
   }
-  if (props.historyState === "loading") label = "Searching…";
-  if (props.historyState === "error") label = "Search failed";
-  const navigationDisabled = props.matchCount === 0 || props.historyState === "loading";
+  if (props.status === "loading") label = "Searching…";
+  if (props.status === "error") label = "Search failed";
+  const navigationDisabled = props.matchCount === 0 || props.status === "loading";
   const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
     if (event.key === "Enter") {
@@ -57,7 +56,7 @@ export function ThreadFindBar(props: ThreadFindBarProps) {
       onContextMenu={(event) => event.stopPropagation()}
       role="search"
       aria-label="Find in thread"
-      aria-busy={props.historyState === "loading"}
+      aria-busy={props.status === "loading"}
       className="absolute top-[calc(100%+0.5rem)] right-0 z-40 w-[min(24rem,calc(100vw-1.5rem))] [-webkit-app-region:no-drag]"
     >
       <InputGroupInput
@@ -83,8 +82,8 @@ export function ThreadFindBar(props: ThreadFindBarProps) {
         >
           {label}
         </span>
-        {props.historyState === "incomplete" || props.historyState === "error" ? (
-          <Button size="xs" variant="ghost" onClick={props.onRetryHistory}>
+        {props.status === "error" ? (
+          <Button size="xs" variant="ghost" onClick={props.onRetry}>
             Retry
           </Button>
         ) : null}

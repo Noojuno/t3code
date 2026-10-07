@@ -2,13 +2,13 @@ import type { InlineSkill } from "@t3tools/shared/inlineSkills";
 import type { OrchestrationV2ThreadProjection, ScopedThreadRef } from "@t3tools/contracts";
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { deriveTimelineEntriesFromVisibleTurnItems, type TimelineEntry } from "~/session-logic";
+import { deriveTimelineEntriesFromVisibleTurnItems } from "~/session-logic";
 import { orchestrationEnvironment } from "~/state/orchestration";
 import { useEnvironmentQuery } from "~/state/query";
 import { useDebouncedValue } from "~/state/queries";
-import { buildThreadFindMatches, clampThreadFindIndex, stepThreadFindIndex } from "./threadFind";
+import { stepThreadFindIndex } from "./threadFind";
 import { subscribeThreadFindOpen } from "./threadFindActionBus";
-import { useThreadFindHistory } from "./useThreadFindHistory";
+import { toastManager } from "../ui/toast";
 
 const EMPTY_SKILLS: readonly InlineSkill[] = [];
 
@@ -20,70 +20,56 @@ const CLOSED_FIND = {
   navigationId: 0,
 };
 
-/** Owns find state and presents the same controls for server search and older-server history. */
+/** Owns find state for the active thread and its environment. */
 export function useThreadFind({
   thread,
-  serverSearch,
-  cwd,
+  enabled,
   skills = EMPTY_SKILLS,
   content,
-  entries,
-  history,
 }: {
   thread: ScopedThreadRef | null;
-  serverSearch: boolean;
-  cwd: string | undefined;
+  enabled: boolean;
   skills?: readonly InlineSkill[];
   content: Pick<OrchestrationV2ThreadProjection, "visibleTurnItems" | "runs"> | undefined;
-  entries: ReadonlyArray<TimelineEntry>;
-  history: Parameters<typeof useThreadFindHistory>[1];
 }) {
   const threadKey = thread ? scopedThreadKey(thread) : null;
   const [state, setState] = useState(CLOSED_FIND);
-  if (state.threadKey !== null && state.threadKey !== threadKey) setState(CLOSED_FIND);
-  const isOpen = threadKey !== null && state.threadKey === threadKey;
+  if (state.threadKey !== null && (!enabled || state.threadKey !== threadKey))
+    setState(CLOSED_FIND);
+  const isOpen = enabled && threadKey !== null && state.threadKey === threadKey;
   const open = useCallback(() => {
     if (threadKey === null) return;
+    if (!enabled) {
+      toastManager.add({
+        id: "thread-find-unavailable",
+        title: "Thread search is unavailable on this server.",
+        description: "Update the server to enable it.",
+      });
+      return;
+    }
     setState((previous) => ({
       ...(previous.threadKey === threadKey ? previous : CLOSED_FIND),
       threadKey,
       focusRequestId: previous.focusRequestId + 1,
     }));
-  }, [threadKey]);
+  }, [enabled, threadKey]);
   const close = useCallback(() => setState(CLOSED_FIND), []);
   useEffect(() => subscribeThreadFindOpen(open), [open]);
 
   const remote = useServerResults(
-    serverSearch && isOpen ? thread : null,
+    isOpen ? thread : null,
     state.query,
     state.activeIndex,
     content,
     skills,
   );
-  const localStatus = useThreadFindHistory(
-    !serverSearch && isOpen && state.query.trim() ? `${threadKey}:${state.focusRequestId}` : null,
-    history,
-  );
-  let status: "loading" | "incomplete" | "error" | null = localStatus;
-  if (serverSearch) {
-    status = null;
-    if (remote.isPending) status = "loading";
-    if (remote.error) status = "error";
-  }
-  const localMatches = useMemo(
-    () =>
-      buildThreadFindMatches(
-        entries,
-        !serverSearch && isOpen && status !== "loading" ? state.query : "",
-        cwd,
-        skills,
-      ),
-    [cwd, entries, isOpen, serverSearch, skills, state.query, status],
-  );
-  const count = serverSearch ? (remote.data?.totalMatches ?? 0) : localMatches.length;
-  const activeIndex = serverSearch
-    ? (remote.data?.activeIndex ?? 0)
-    : clampThreadFindIndex(state.activeIndex, count);
+  const status: "loading" | "error" | null = remote.error
+    ? "error"
+    : remote.isPending
+      ? "loading"
+      : null;
+  const count = remote.data?.totalMatches ?? 0;
+  const activeIndex = remote.data?.activeIndex ?? 0;
   const searchEntries = useMemo(
     () =>
       remote.data?.match
@@ -94,8 +80,6 @@ export function useThreadFind({
         : null,
     [remote.data],
   );
-  const selected = remote.data?.match;
-  const activeMatch = serverSearch ? selected : localMatches[activeIndex];
   const step = (delta: number) =>
     setState((previous) => ({
       ...previous,
@@ -112,9 +96,9 @@ export function useThreadFind({
       query: state.query,
       matchCount: count,
       activeIndex,
-      historyState: status,
+      status,
       focusRequestId: state.focusRequestId,
-      onRetryHistory: serverSearch ? remote.refresh : open,
+      onRetry: remote.refresh,
       onQueryChange: (query: string) =>
         setState((previous) => ({ ...previous, query, activeIndex: 0 })),
       onNext: () => step(1),
@@ -123,10 +107,10 @@ export function useThreadFind({
     },
     timelineProps: {
       findOpen: isOpen,
-      searchEntries: !serverSearch && isOpen && state.query.trim() ? entries : searchEntries,
+      searchEntries,
       onCloseSearch: close,
-      findQuery: isOpen && (!serverSearch || searchEntries !== null) ? state.query : "",
-      activeFindMatch: activeMatch ?? null,
+      findQuery: isOpen && searchEntries !== null ? state.query : "",
+      activeFindMatch: remote.data?.match ?? null,
       findNavigationId: state.navigationId,
     },
   };
