@@ -7904,7 +7904,11 @@ export default function ChatView(props: ChatViewProps) {
     }),
     [composerRef, previewPanelOpen, terminalUiState.terminalOpen, routeKind, phase],
   );
+  const timelineSkills = activeProviderStatus
+    ? resolveProviderSkillsForCwd(activeProviderStatus, gitCwd)
+    : EMPTY_PROVIDER_SKILLS;
   const threadFind = useThreadFind({
+    skills: timelineSkills,
     cwd: gitCwd ?? undefined,
     thread: activeThreadRef,
     serverSearch: isServerThread && serverConfig?.threadFind === true,
@@ -7914,10 +7918,7 @@ export default function ChatView(props: ChatViewProps) {
       ? {
           loading: threadHistoryControls.loading,
           cursor: serverThreadHistory.historyCursor,
-          onLoadEarlier: () => {
-            threadHistoryControls.onLoadEarlier();
-            return true;
-          },
+          onLoadEarlier: threadHistoryControls.onLoadEarlier,
         }
       : null,
   });
@@ -7929,13 +7930,8 @@ export default function ChatView(props: ChatViewProps) {
         event.stopPropagation();
         return;
       }
-      if (isThreadFindActive && event.key === "Escape") {
-        event.preventDefault();
-        event.stopPropagation();
-        closeThreadFind();
-        focusComposer();
-        return;
-      }
+      // Let contextual controls claim Escape before the bubbling find handler.
+      if (isThreadFindActive && event.key === "Escape") return;
       if (isTerminalCloseConfirmPending() && preventTerminalCloseShortcut(event, keybindings)) {
         event.stopPropagation();
         return;
@@ -8216,8 +8212,28 @@ export default function ChatView(props: ChatViewProps) {
       event.stopPropagation();
       void runProjectScript(script);
     };
+    const dismissFind = (event: KeyboardEvent) => {
+      if (
+        event.key !== "Escape" ||
+        !isThreadFindActive ||
+        event.defaultPrevented ||
+        event.isComposing ||
+        event.keyCode === 229 ||
+        isCommandPaletteOpen()
+      )
+        return;
+      const context = getShortcutContext(event.target);
+      if (context.terminalFocus || context.previewFocus || context.modelPickerOpen) return;
+      event.preventDefault();
+      closeThreadFind();
+      focusComposer();
+    };
     window.addEventListener("keydown", handler, true);
-    return () => window.removeEventListener("keydown", handler, true);
+    window.addEventListener("keydown", dismissFind);
+    return () => {
+      window.removeEventListener("keydown", handler, true);
+      window.removeEventListener("keydown", dismissFind);
+    };
   }, [
     activeProject,
     activeRightPanelSurface,
@@ -11246,11 +11262,17 @@ export default function ChatView(props: ChatViewProps) {
             activeThreadTitle={activeThread.title}
             activeProject={activeProject ?? null}
             rightPanelOpen={inlineRightPanelOwnsTitleBar}
-            findBar={<ThreadFindBar {...threadFind.barProps} />}
             onNewThreadInProject={handleNewThreadInActiveProject}
             {...(activeDraftLogicalProjectKey
               ? { onOpenProjectSettings: handleOpenDraftProjectSettings }
               : {})}
+          />
+          <ThreadFindBar
+            {...threadFind.barProps}
+            onClose={() => {
+              closeThreadFind();
+              focusComposer();
+            }}
           />
         </header>
 
@@ -11381,11 +11403,7 @@ export default function ChatView(props: ChatViewProps) {
                     ? (heldPaintContext?.workspaceRoot ?? undefined)
                     : activeWorkspaceRoot
                 }
-                skills={
-                  activeProviderStatus
-                    ? resolveProviderSkillsForCwd(activeProviderStatus, gitCwd)
-                    : EMPTY_PROVIDER_SKILLS
-                }
+                skills={timelineSkills}
                 anchorMessageId={paintOnlyDisplayedTimeline ? null : timelineAnchorMessageId}
                 onAnchorReady={onTimelineAnchorReady}
                 onAnchorSizeChanged={onTimelineAnchorSizeChanged}
@@ -11395,6 +11413,7 @@ export default function ChatView(props: ChatViewProps) {
                 onContentOverflowChange={setTimelineOverflows}
                 onToolOutputCollapsedAtEnd={onToolOutputCollapsedAtEnd}
                 onManualNavigation={cancelTimelineLiveFollowForUserNavigation}
+                onResumeLiveFollow={scrollToEnd}
                 cancelPositionRestoreRef={cancelPositionRestoreRef}
                 hideEmptyPlaceholder={isDraftHeroState || threadDetailLoading}
                 topFadeEnabled={!hasTimelineTopBanner}
@@ -11404,7 +11423,7 @@ export default function ChatView(props: ChatViewProps) {
               />
 
               {/* scroll to end pill — shown when user has scrolled away from the live edge */}
-              {showScrollToBottom && threadFind.timelineProps.searchEntries === null && (
+              {showScrollToBottom && !isThreadFindActive && (
                 <div
                   className="chat-scroll-to-bottom pointer-events-none absolute z-30 flex justify-center py-1.5"
                   style={{ bottom: scrollToEndClearance + 4 }}

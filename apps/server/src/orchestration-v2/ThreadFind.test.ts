@@ -16,6 +16,7 @@ import {
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
@@ -224,6 +225,69 @@ describe("V2 thread find", () => {
       assert.equal(
         (yield* projection.searchThread({ threadId, query: "check", index: 99 })).activeIndex,
         3,
+      );
+    }).pipe(Effect.provide(layerTest)),
+  );
+
+  it.effect("keeps a search snapshot consistent while another thread commits", () =>
+    Effect.gen(function* () {
+      const projection = yield* setup;
+      const other = ThreadId.make("thread:busy");
+      yield* commit([thread(other, projectId), run(other, RunId.make("run:busy"))]);
+      yield* putItems(Array.from({ length: 260 }, (_, i) => item(`message:${i}`, i, "needle")));
+      const before = yield* projection.searchThread({ threadId, query: "needle" });
+      const [during] = yield* Effect.all(
+        [
+          projection.searchThread({ threadId, query: "needle", index: 259 }),
+          putItems([item("busy", 1, "busy", "assistant_message", other)]),
+        ],
+        { concurrency: "unbounded" },
+      );
+      assert.equal(during.totalMatches, 260);
+      assert.equal(during.match?.entryId, "message:259");
+      assert.equal(during.snapshotSequence, before.snapshotSequence);
+      assert.equal(
+        (yield* projection.searchThread({ threadId, query: "needle" })).snapshotSequence,
+        before.snapshotSequence,
+      );
+    }).pipe(Effect.provide(layerTest)),
+  );
+
+  it.effect("searches displayed skill labels and invalidates parsed text when labels change", () =>
+    Effect.gen(function* () {
+      const projection = yield* setup;
+      yield* putItems([item("skill", 1, "Use $test-t3-app now")]);
+      const input = {
+        threadId,
+        query: "T3 App Testing",
+        skills: [{ name: "test-t3-app", displayName: "T3 App Testing" }],
+      };
+      assert.equal((yield* projection.searchThread(input)).totalMatches, 1);
+      assert.equal((yield* projection.searchThread({ ...input, skills: [] })).totalMatches, 0);
+      assert.equal((yield* projection.searchThread({ ...input, query: "App" })).totalMatches, 1);
+    }).pipe(Effect.provide(layerTest)),
+  );
+
+  it.effect("never mixes message versions when the searched thread changes during a scan", () =>
+    Effect.gen(function* () {
+      const projection = yield* setup;
+      const sql = yield* SqlClient.SqlClient;
+      const items = Array.from({ length: 260 }, (_, i) => item(`message:${i}`, i, "needle"));
+      yield* putItems(items);
+      const updated = items.map((item) =>
+        item.type === "assistant_message" ? { ...item, text: "needle needle" } : item,
+      );
+      const [during] = yield* Effect.all(
+        [
+          projection.searchThread({ threadId, query: "needle" }),
+          sql.withTransaction(putItems(updated, "concurrent")),
+        ],
+        { concurrency: "unbounded" },
+      );
+      assert.include([260, 520], during.totalMatches);
+      assert.equal(
+        (yield* projection.searchThread({ threadId, query: "needle" })).totalMatches,
+        520,
       );
     }).pipe(Effect.provide(layerTest)),
   );

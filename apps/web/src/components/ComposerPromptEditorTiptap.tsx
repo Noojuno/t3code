@@ -1,3 +1,4 @@
+import { formatProviderSkillDisplayName } from "@t3tools/shared/inlineSkills";
 import { Extension, Node, wrappingInputRule, type JSONContent } from "@tiptap/core";
 import { TaskList } from "@tiptap/extension-task-list";
 import { ReactNodeViewRenderer, NodeViewWrapper, type NodeViewProps } from "@tiptap/react";
@@ -80,7 +81,6 @@ import {
   ComposerContextRecordsContext,
 } from "./composerContextPresentation";
 import type { AssistantCitationSourceAnchor } from "~/lib/assistantTextSelection";
-import { formatProviderSkillDisplayName } from "@t3tools/client-runtime/providerSkills";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import { importPastedComposerText } from "./composerInlineTokenPaste";
 import { didComposerSelectionChangeVisibly } from "./composerSelection";

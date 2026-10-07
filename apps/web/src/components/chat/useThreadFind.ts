@@ -1,3 +1,4 @@
+import type { InlineSkill } from "@t3tools/shared/inlineSkills";
 import type { OrchestrationV2ThreadProjection, ScopedThreadRef } from "@t3tools/contracts";
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -8,6 +9,8 @@ import { useDebouncedValue } from "~/state/queries";
 import { buildThreadFindMatches, clampThreadFindIndex, stepThreadFindIndex } from "./threadFind";
 import { subscribeThreadFindOpen } from "./threadFindActionBus";
 import { useThreadFindHistory } from "./useThreadFindHistory";
+
+const EMPTY_SKILLS: readonly InlineSkill[] = [];
 
 const CLOSED_FIND = {
   threadKey: null as string | null,
@@ -22,6 +25,7 @@ export function useThreadFind({
   thread,
   serverSearch,
   cwd,
+  skills = EMPTY_SKILLS,
   content,
   entries,
   history,
@@ -29,6 +33,7 @@ export function useThreadFind({
   thread: ScopedThreadRef | null;
   serverSearch: boolean;
   cwd: string | undefined;
+  skills?: readonly InlineSkill[];
   content: Pick<OrchestrationV2ThreadProjection, "visibleTurnItems" | "runs"> | undefined;
   entries: ReadonlyArray<TimelineEntry>;
   history: Parameters<typeof useThreadFindHistory>[1];
@@ -53,6 +58,7 @@ export function useThreadFind({
     state.query,
     state.activeIndex,
     content,
+    skills,
   );
   const localStatus = useThreadFindHistory(
     !serverSearch && isOpen && state.query.trim() ? `${threadKey}:${state.focusRequestId}` : null,
@@ -70,8 +76,9 @@ export function useThreadFind({
         entries,
         !serverSearch && isOpen && status !== "loading" ? state.query : "",
         cwd,
+        skills,
       ),
-    [cwd, entries, isOpen, serverSearch, state.query, status],
+    [cwd, entries, isOpen, serverSearch, skills, state.query, status],
   );
   const count = serverSearch ? (remote.data?.totalMatches ?? 0) : localMatches.length;
   const activeIndex = serverSearch
@@ -88,13 +95,7 @@ export function useThreadFind({
     [remote.data],
   );
   const selected = remote.data?.match;
-  const activeMatch = serverSearch
-    ? selected && {
-        entryId: selected.entryId,
-        runId: selected.runId,
-        occurrence: selected.occurrence,
-      }
-    : localMatches[activeIndex];
+  const activeMatch = serverSearch ? selected : localMatches[activeIndex];
   const step = (delta: number) =>
     setState((previous) => ({
       ...previous,
@@ -121,7 +122,8 @@ export function useThreadFind({
       onClose: close,
     },
     timelineProps: {
-      searchEntries,
+      findOpen: isOpen,
+      searchEntries: !serverSearch && isOpen && state.query.trim() ? entries : searchEntries,
       onCloseSearch: close,
       findQuery: isOpen && (!serverSearch || searchEntries !== null) ? state.query : "",
       activeFindMatch: activeMatch ?? null,
@@ -136,14 +138,19 @@ function useServerResults(
   query: string,
   index: number,
   content: Pick<OrchestrationV2ThreadProjection, "visibleTurnItems" | "runs"> | undefined,
+  skills: readonly InlineSkill[],
 ) {
+  const skillLabels = useMemo(
+    () => skills.map(({ name, displayName }) => ({ name, displayName })),
+    [skills],
+  );
   const normalizedQuery = query.trim();
   const debouncedQuery = useDebouncedValue(normalizedQuery, 200);
   const atom =
     thread && debouncedQuery && normalizedQuery === debouncedQuery
       ? orchestrationEnvironment.threadFind({
           environmentId: thread.environmentId,
-          input: { threadId: thread.threadId, query: debouncedQuery, index },
+          input: { threadId: thread.threadId, query: debouncedQuery, index, skills: skillLabels },
         })
       : null;
   const result = useEnvironmentQuery(atom);

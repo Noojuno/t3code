@@ -12,7 +12,6 @@ import { countThreadSearchOccurrences } from "@t3tools/shared/threadSearch";
 import * as Cache from "effect/Cache";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
-import * as Exit from "effect/Exit";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
 import { ProjectionStoreReadError, type ProjectionStoreV2Error } from "./ProjectionStore.ts";
@@ -28,27 +27,83 @@ interface FindDocument extends FindRow {
   readonly runId: OrchestrationV2TurnItem["runId"];
   readonly count: number;
 }
-class SearchKey extends Data.Class<{
-  threadId: ThreadId;
-  query: string;
-  sequence: number;
+class TextKey extends Data.Class<{
+  text: string;
+  role: "user" | "assistant" | "plan";
+  streaming: boolean;
+  hasContext: boolean;
   cwd: string | undefined;
+  skills: NonNullable<OrchestrationV2SearchThreadInput["skills"]>;
 }> {}
 
-function countItem(item: OrchestrationV2TurnItem, query: string, cwd?: string): number {
-  let segments: readonly string[] | null = null;
-  if (item.type === "proposed_plan") segments = searchablePlanSegments(item.markdown, cwd);
-  else if (item.type === "user_message" || item.type === "assistant_message")
-    segments = searchableMessageSegments(
-      {
-        role: item.type === "user_message" ? "user" : "assistant",
-        text: item.text,
-        streaming: item.type === "assistant_message" && item.streaming,
-        context: item.type === "user_message" ? item.context : undefined,
-      },
-      cwd,
-    );
-  return segments?.reduce((sum, text) => sum + countThreadSearchOccurrences(text, query), 0) ?? 0;
+function textKey(
+  item: OrchestrationV2TurnItem,
+  cwd: string | undefined,
+  skills: TextKey["skills"],
+) {
+  return new TextKey({
+    text:
+      item.type === "proposed_plan"
+        ? item.markdown
+        : item.type === "user_message" || item.type === "assistant_message"
+          ? item.text
+          : "",
+    role:
+      item.type === "proposed_plan" ? "plan" : item.type === "user_message" ? "user" : "assistant",
+    streaming: item.type === "assistant_message" && item.streaming,
+    hasContext: item.type === "user_message" && item.context !== undefined,
+    cwd,
+    skills,
+  });
+}
+
+function parseText(key: TextKey): readonly string[] {
+  return key.role === "plan"
+    ? searchablePlanSegments(key.text, key.cwd, key.skills)
+    : (searchableMessageSegments(
+        {
+          role: key.role,
+          text: key.text,
+          streaming: key.streaming,
+          context: key.hasContext ? { version: 1, records: [] } : undefined,
+        },
+        key.cwd,
+        key.skills,
+      ) ?? []);
+}
+
+function searchableRows(items: readonly OrchestrationV2ProjectedTurnItem[]) {
+  const foldedAnswers = new Set(
+    items.flatMap(({ item }) =>
+      item.type === "user_input_request" && item.questionAnswer
+        ? [`async-answer:${item.questionAnswer.requestId}`]
+        : [],
+    ),
+  );
+  return items.filter(
+    ({ item }) =>
+      ["user_message", "assistant_message", "proposed_plan"].includes(item.type) &&
+      !(item.type === "user_message" && foldedAnswers.has(item.messageId)),
+  );
+}
+
+function documentFor(row: OrchestrationV2ProjectedTurnItem, count: number): FindDocument {
+  return {
+    position: row.position,
+    visibility: row.visibility,
+    sourceThreadId: row.sourceThreadId,
+    sourceItemId: row.sourceItemId,
+    entryId:
+      row.item.type === "user_message" || row.item.type === "assistant_message"
+        ? row.item.messageId
+        : row.item.id,
+    runId: row.item.runId,
+    count,
+  };
+}
+
+function countSegments(segments: readonly string[], query: string) {
+  return segments.reduce((sum, text) => sum + countThreadSearchOccurrences(text, query), 0);
 }
 
 function selectMatch(documents: readonly FindDocument[], requestedIndex: number) {
@@ -69,28 +124,23 @@ export function findProjectedThreadItems(
   snapshotSequence: number,
   cwd?: string,
 ): OrchestrationV2SearchThreadResult {
-  const foldedAnswers = new Set(
-    items.flatMap(({ item }) =>
-      item.type === "user_input_request" && item.questionAnswer
-        ? [`async-answer:${item.questionAnswer.requestId}`]
-        : [],
+  const rows = searchableRows(items);
+  const docs = rows.map((row) =>
+    documentFor(
+      row,
+      countSegments(parseText(textKey(row.item, cwd, input.skills ?? [])), input.query),
     ),
   );
-  const rows = items.filter(
-    ({ item }) =>
-      ["user_message", "assistant_message", "proposed_plan"].includes(item.type) &&
-      !(item.type === "user_message" && foldedAnswers.has(item.messageId)),
-  );
-  const docs: FindDocument[] = rows.map((row) => ({
-    ...row,
-    entryId:
-      row.item.type === "user_message" || row.item.type === "assistant_message"
-        ? row.item.messageId
-        : row.item.id,
-    runId: row.item.runId,
-    count: countItem(row.item, input.query, cwd),
-  }));
-  const selected = selectMatch(docs, input.index ?? 0);
+  return resultFor(rows, docs, input.index ?? 0, snapshotSequence);
+}
+
+function resultFor(
+  rows: readonly OrchestrationV2ProjectedTurnItem[],
+  docs: readonly FindDocument[],
+  requestedIndex: number,
+  snapshotSequence: number,
+): OrchestrationV2SearchThreadResult {
+  const selected = selectMatch(docs, requestedIndex);
   const index = selected.document === null ? -1 : docs.indexOf(selected.document);
   return {
     snapshotSequence,
@@ -118,18 +168,11 @@ export const makeThreadFind = Effect.fn("makeThreadFind")(function* (
   >,
 ) {
   const sql = yield* SqlClient.SqlClient;
+  const encodeThreadIds = Schema.encodeEffect(Schema.fromJsonString(Schema.Array(ThreadId)));
   const encodeSources = Schema.encodeEffect(
     Schema.fromJsonString(Schema.Array(Schema.Struct({ threadId: ThreadId, id: TurnItemId }))),
   );
   const decodeItem = Schema.decodeUnknownEffect(Schema.fromJsonString(OrchestrationV2TurnItemJson));
-  const revision = (threadId: ThreadId) =>
-    sql<{ sequence: number }>`
-    SELECT COALESCE(MAX(sequence), 0) AS sequence FROM orchestration_events
-  `.pipe(
-      Effect.map((rows) => rows[0]?.sequence ?? 0),
-      Effect.mapError((cause) => new ProjectionStoreReadError({ threadId, cause })),
-    );
-  const changed = (threadId: ThreadId) => new ProjectionStoreReadError({ threadId });
   const load = Effect.fn("ThreadFind.load")(function* (
     threadId: ThreadId,
     rows: readonly FindRow[],
@@ -154,7 +197,7 @@ export const makeThreadFind = Effect.fn("makeThreadFind")(function* (
     return yield* Effect.forEach(rows, (row) =>
       Effect.gen(function* () {
         const payload = byThread.get(row.sourceThreadId)?.get(row.sourceItemId);
-        if (payload === undefined) return yield* changed(threadId);
+        if (payload === undefined) return yield* new ProjectionStoreReadError({ threadId });
         const item = yield* decodeItem(payload).pipe(
           Effect.mapError((cause) => new ProjectionStoreReadError({ threadId, cause })),
         );
@@ -162,92 +205,68 @@ export const makeThreadFind = Effect.fn("makeThreadFind")(function* (
       }),
     );
   });
-  const scan = Effect.fn("ThreadFind.scan")(function* (key: SearchKey) {
-    const index = yield* readIndex(key.threadId);
-    const rows = index.map((row, position) => ({ ...row, position }));
-    // Question answers render inside their request card, not as searchable message bubbles.
-    const questions = rows.filter((row) => row.item.type === "user_input_request");
-    const foldedAnswers = new Set<string>();
-    for (let start = 0; start < questions.length; start += 128) {
-      for (const { item } of yield* load(key.threadId, questions.slice(start, start + 128))) {
-        if (item.type === "user_input_request" && item.questionAnswer)
-          foldedAnswers.add(`async-answer:${item.questionAnswer.requestId}`);
-      }
-      yield* Effect.yieldNow;
-    }
-    const candidates = rows.filter((row) =>
-      ["user_message", "assistant_message", "proposed_plan"].includes(row.item.type),
-    );
-    const context: FindRow[] = [];
-    const documents: FindDocument[] = [];
-    for (let start = 0; start < candidates.length; start += 128) {
-      const batch = yield* load(key.threadId, candidates.slice(start, start + 128));
-      for (const { item, ...row } of batch) {
-        if (item.type === "user_message" && foldedAnswers.has(item.messageId)) continue;
-        context.push(row);
-        const count = countItem(item, key.query, key.cwd);
-        if (count > 0)
-          documents.push({
-            ...row,
-            count,
-            runId: item.runId,
-            entryId:
-              item.type === "user_message" || item.type === "assistant_message"
-                ? item.messageId
-                : item.id,
-          });
-      }
-      yield* Effect.yieldNow;
-    }
-    if ((yield* revision(key.threadId)) !== key.sequence) return yield* changed(key.threadId);
-    return { documents, context };
+  // Cache rendered segments, not queries; typing and navigation reuse Markdown parsing.
+  const textCache = yield* Cache.make({
+    capacity: 512,
+    timeToLive: "1 minute",
+    lookup: (key: TextKey) => Effect.sync(() => parseText(key)),
   });
-  // Keep IDs/counts only. Navigation never retains transcript bodies or one record per occurrence.
-  const cache = yield* Cache.makeWith(scan, {
-    capacity: 16,
-    timeToLive: (exit) =>
-      Exit.isSuccess(exit) && exit.value.context.length <= 10_000 ? "1 minute" : 0,
-  });
+  const snapshot = Effect.fn("ThreadFind.snapshot")(
+    function* (threadId: ThreadId) {
+      const active = yield* sql<{ cwd: string | null }>`
+      SELECT COALESCE(json_extract(t.payload_json, '$.worktreePath'), p.workspace_root) AS cwd
+      FROM orchestration_v2_projection_threads t JOIN projection_projects p ON p.project_id = t.project_id
+      WHERE t.thread_id = ${threadId} AND t.deleted_at IS NULL AND p.deleted_at IS NULL
+    `;
+      if (!active[0]) return yield* new ProjectionStoreReadError({ threadId });
+      const index = yield* readIndex(threadId);
+      const sources = yield* encodeThreadIds([
+        ...new Set([threadId, ...index.map((row) => row.sourceThreadId)]),
+      ]);
+      const revision = yield* sql<{ sequence: number }>`
+      SELECT COALESCE(MAX(sequence), 0) AS sequence FROM orchestration_events
+      WHERE application_event_version = 2 AND aggregate_kind = 'thread'
+        AND stream_id IN (SELECT value FROM json_each(${sources}))
+    `;
+      const candidates = index
+        .map((row, position) => ({ ...row, position }))
+        .filter((row) =>
+          ["user_message", "assistant_message", "proposed_plan", "user_input_request"].includes(
+            row.item.type,
+          ),
+        );
+      const items: OrchestrationV2ProjectedTurnItem[] = [];
+      for (let start = 0; start < candidates.length; start += 128) {
+        items.push(...(yield* load(threadId, candidates.slice(start, start + 128))));
+      }
+      return { items, cwd: active[0].cwd ?? undefined, sequence: revision[0]?.sequence ?? 0 };
+    },
+    sql.withTransaction,
+    (effect, threadId) =>
+      effect.pipe(
+        Effect.mapError((cause) =>
+          Schema.is(ProjectionStoreReadError)(cause)
+            ? cause
+            : new ProjectionStoreReadError({ threadId, cause }),
+        ),
+      ),
+  );
   return Effect.fn("ProjectionStore.searchThread")(function* (
     input: OrchestrationV2SearchThreadInput,
   ) {
-    const active = yield* sql<{ cwd: string | null }>`
-      SELECT COALESCE(json_extract(t.payload_json, '$.worktreePath'), p.workspace_root) AS cwd
-      FROM orchestration_v2_projection_threads t JOIN projection_projects p ON p.project_id = t.project_id
-      WHERE t.thread_id = ${input.threadId} AND t.deleted_at IS NULL AND p.deleted_at IS NULL
-    `.pipe(
-      Effect.mapError((cause) => new ProjectionStoreReadError({ threadId: input.threadId, cause })),
-    );
-    if (!active[0]) return yield* changed(input.threadId);
-    const snapshotSequence = yield* revision(input.threadId);
-    const { documents, context } = yield* Cache.get(
-      cache,
-      new SearchKey({
-        threadId: input.threadId,
-        query: input.query,
-        sequence: snapshotSequence,
-        cwd: active[0].cwd ?? undefined,
-      }),
-    );
-    const selected = selectMatch(documents, input.index ?? 0);
-    const document = selected.document;
-    const index =
-      document === null ? -1 : context.findIndex((row) => row.position === document.position);
-    const items =
-      index < 0
-        ? []
-        : yield* load(input.threadId, context.slice(Math.max(0, index - 2), index + 3));
-    if ((yield* revision(input.threadId)) !== snapshotSequence)
-      return yield* changed(input.threadId);
-    return {
-      snapshotSequence,
-      totalMatches: selected.totalMatches,
-      activeIndex: selected.activeIndex,
-      match:
-        document === null
-          ? null
-          : { entryId: document.entryId, runId: document.runId, occurrence: selected.occurrence },
-      items,
-    };
+    // Release the SQLite connection before parsing. All rows and their revision
+    // come from one snapshot, including inherited fork history.
+    const { items, cwd, sequence } = yield* snapshot(input.threadId);
+    const rows = searchableRows(items);
+    const skills = input.skills ?? [];
+    const documents: FindDocument[] = [];
+    for (const row of rows) {
+      const key = textKey(row.item, cwd, skills);
+      const segments =
+        key.text.length <= 32_768 ? yield* Cache.get(textCache, key) : parseText(key);
+      documents.push(documentFor(row, countSegments(segments, input.query)));
+      yield* Effect.yieldNow;
+    }
+    return resultFor(rows, documents, input.index ?? 0, sequence);
   });
 });

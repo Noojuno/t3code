@@ -40,7 +40,6 @@ import {
 import { cn } from "~/lib/utils";
 
 interface ChatHeaderProps {
-  findBar: import("react").ReactNode;
   activeThreadEnvironmentId: EnvironmentId;
   activeThreadId: ThreadId;
   activeThreadTitle: string;
@@ -74,7 +73,6 @@ export function resolveRenameCommit(input: {
 // opens immediately.
 const TITLE_MENU_OPEN_DELAY_MS = 500;
 export const ChatHeader = memo(function ChatHeader({
-  findBar,
   activeThreadEnvironmentId,
   activeThreadId,
   activeThreadTitle,
@@ -358,7 +356,6 @@ export const ChatHeader = memo(function ChatHeader({
           )}
         </WorkspaceBreadcrumbItem>
       </WorkspaceBreadcrumb>
-      {findBar}
     </div>
   );
 });

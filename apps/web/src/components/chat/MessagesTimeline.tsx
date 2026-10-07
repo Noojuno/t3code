@@ -1,4 +1,4 @@
-const NOOP_SEARCH_LAYOUT = () => {};
+import { shouldPreserveAssistantLineBreaks } from "@t3tools/shared/markdownPipeline";
 import { MarkdownFindContext } from "./markdownFindContext";
 import { ComputerUseAppIcon } from "~/components/Icons";
 import { useChatCanvas } from "./ChatCanvasContext";
@@ -208,7 +208,6 @@ import {
   resolveTimelineMinimapTopPercent,
   resolveWorkGroupScrollIndex,
   shouldFollowWorkGroupAppend,
-  shouldPreserveAssistantLineBreaks,
   toolGroupAction,
   workEntryDisplayLabel,
   workEntryReadOutput,
@@ -391,6 +390,9 @@ function TimelineListFooter({
     </div>
   );
 }
+const NOOP_SEARCH_LAYOUT = () => {};
+const EMPTY_FIND_DIFFS: MessagesTimelineProps["turnDiffSummaries"] = [];
+
 const EMPTY_TIMELINE_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">> = [];
 const TIMELINE_MAINTAIN_SCROLL_AT_END = {
   animated: false,
@@ -506,6 +508,8 @@ interface MessagesTimelineProps {
   onContentOverflowChange?: (overflows: boolean) => void;
   onToolOutputCollapsedAtEnd?: () => void;
   onManualNavigation: () => void;
+  onResumeLiveFollow?: () => void;
+  findOpen?: boolean;
   cancelPositionRestoreRef?: React.RefObject<(() => void) | null> | undefined;
   hideEmptyPlaceholder?: boolean;
   topFadeEnabled?: boolean;
@@ -527,6 +531,27 @@ export function MessagesTimeline(props: MessagesTimelineProps) {
   const searchListRef = useRef<LegendListRef | null>(null);
   const searchEntries = props.searchEntries;
   const searching = searchEntries != null;
+  const origin = useRef<{ threadId: string; following: boolean } | null>(null);
+  const {
+    findOpen,
+    routeThreadKey: threadId,
+    liveFollowEnabled,
+    onManualNavigation,
+    onResumeLiveFollow,
+  } = props;
+  useLayoutEffect(() => {
+    if (origin.current?.threadId !== threadId) origin.current = null;
+    if (findOpen) {
+      if (!origin.current) {
+        origin.current = { threadId, following: liveFollowEnabled };
+        onManualNavigation();
+      }
+    } else if (origin.current) {
+      const following = origin.current.following;
+      origin.current = null;
+      if (following) onResumeLiveFollow?.();
+    }
+  }, [findOpen, threadId, liveFollowEnabled, onManualNavigation, onResumeLiveFollow]);
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
       <div
@@ -538,9 +563,9 @@ export function MessagesTimeline(props: MessagesTimelineProps) {
         <ConversationTimeline
           {...props}
           canvasActive={!searching}
-          findQuery={searching ? "" : (props.findQuery ?? "")}
-          activeFindMatch={searching ? null : (props.activeFindMatch ?? null)}
-          liveFollowEnabled={!searching && props.liveFollowEnabled}
+          findQuery=""
+          activeFindMatch={null}
+          liveFollowEnabled={!findOpen && props.liveFollowEnabled}
         />
       </div>
       {searchEntries && (
@@ -564,7 +589,7 @@ export function MessagesTimeline(props: MessagesTimelineProps) {
             anchorMessageId={null}
             latestRun={null}
             runningRunId={null}
-            turnDiffSummaries={[]}
+            turnDiffSummaries={EMPTY_FIND_DIFFS}
             supportsConversationRollback={false}
             isWorking={false}
             runlessWorkActive={false}
@@ -1409,9 +1434,17 @@ const ConversationTimeline = memo(function ConversationTimeline({
   const activeFindMatchKey = activeFindMatch
     ? `${findNavigationId}:${normalizedFindQuery}:${activeFindMatch.entryId}:${activeFindMatch.occurrence}`
     : null;
+  const revealedFindMatchKeyRef = useRef<string | null>(null);
+  const [positionedFindMatchKey, setPositionedFindMatchKey] = useState<string | null>(null);
   const revealActiveFindRange = useCallback(
     (range: Range | null) => {
-      if (!range) return;
+      if (
+        !range ||
+        !activeFindMatchKey ||
+        positionedFindMatchKey !== activeFindMatchKey ||
+        revealedFindMatchKeyRef.current === activeFindMatchKey
+      )
+        return;
 
       const codeScroller = range.startContainer.parentElement?.closest("pre");
       if (codeScroller) {
@@ -1425,6 +1458,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
       const viewportRect = timelineViewportElement?.getBoundingClientRect();
       if (!viewportRect || matchRect.height === 0) return;
 
+      revealedFindMatchKeyRef.current = activeFindMatchKey;
       const topBoundary = viewportRect.top + FIND_MATCH_VIEW_MARGIN;
       const bottomBoundary =
         viewportRect.bottom - FIND_MATCH_VIEW_MARGIN - contentInsetEndAdjustment;
@@ -1438,30 +1472,43 @@ const ConversationTimeline = memo(function ConversationTimeline({
         listRef.current?.scrollToOffset({ offset: currentScroll + delta, animated: false });
       }
     },
-    [contentInsetEndAdjustment, listRef, timelineViewportElement],
+    [
+      activeFindMatchKey,
+      positionedFindMatchKey,
+      contentInsetEndAdjustment,
+      listRef,
+      timelineViewportElement,
+    ],
   );
 
   const navigatedFindMatchKeyRef = useRef<string | null>(null);
 
+  const activeFindRowIndex = activeFindMatch
+    ? rows.findIndex((row) => row.id === activeFindMatch.entryId)
+    : -1;
   useEffect(() => {
-    if (!activeFindMatch || !activeFindMatchKey) {
+    if (!activeFindMatchKey) {
       navigatedFindMatchKeyRef.current = null;
+      revealedFindMatchKeyRef.current = null;
       return;
     }
-
-    const rowIndex = rows.findIndex((row) => row.id === activeFindMatch.entryId);
-    if (rowIndex === -1) return;
-
-    if (navigatedFindMatchKeyRef.current === activeFindMatchKey) return;
-    navigatedFindMatchKeyRef.current = activeFindMatchKey;
-
-    onManualNavigation();
-    void listRef.current?.scrollToIndex({
-      index: rowIndex,
-      animated: false,
-      viewOffset: FIND_MATCH_VIEW_MARGIN,
-    });
-  }, [activeFindMatch, activeFindMatchKey, listRef, onManualNavigation, rows]);
+    if (activeFindRowIndex < 0 || navigatedFindMatchKeyRef.current === activeFindMatchKey) return;
+    let cancelled = false;
+    void listRef.current
+      ?.scrollToIndex({
+        index: activeFindRowIndex,
+        animated: false,
+        viewOffset: FIND_MATCH_VIEW_MARGIN,
+      })
+      .then(() => {
+        if (cancelled) return;
+        navigatedFindMatchKeyRef.current = activeFindMatchKey;
+        setPositionedFindMatchKey(activeFindMatchKey);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeFindMatchKey, activeFindRowIndex, listRef]);
 
   useThreadFindHighlights({
     container: timelineViewportElement,

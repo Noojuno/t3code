@@ -1,3 +1,4 @@
+import { formatProviderSkillDisplayName } from "@t3tools/shared/inlineSkills";
 import { DESKTOP_PASTE_AS_TEXT_EVENT } from "../../lib/desktopPasteAsText";
 import { runtimeModeConfig, runtimeModeOptions as runtimeModes } from "./runtimeModeConfig";
 import { isLocalEnvironmentDisabled } from "../../localEnvironment";
@@ -1120,7 +1121,6 @@ import {
 } from "@t3tools/client-runtime/state/composer-dispatch";
 import type { ContextWindowSnapshot } from "../../lib/contextWindow";
 import {
-  formatProviderSkillDisplayName,
   getProviderSlashCommandsForSlashMenu,
   getProviderSkillsForSlashMenu,
   hasCompleteProviderWorkspaceSnapshot,

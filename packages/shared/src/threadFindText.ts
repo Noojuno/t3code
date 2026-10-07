@@ -1,3 +1,8 @@
+import {
+  matchInlineSkills,
+  formatProviderSkillDisplayName,
+  type InlineSkill,
+} from "./inlineSkills.ts";
 import { renderCodexFileCitationsAsMarkdown } from "./codexMarkdownDirectives.ts";
 import {
   buildFileLinkParentSuffixByPath,
@@ -19,6 +24,7 @@ import { unified } from "unified";
 import remarkParse from "remark-parse";
 import remarkRehype from "remark-rehype";
 import {
+  shouldPreserveAssistantLineBreaks,
   CHAT_MARKDOWN_REHYPE_PLUGINS,
   CHAT_MARKDOWN_REMARK_PLUGINS,
   CHAT_MARKDOWN_REMARK_PLUGINS_WITH_BREAKS,
@@ -69,6 +75,11 @@ const assistantProcessor = unified()
   .use(CHAT_MARKDOWN_REMARK_PLUGINS)
   .use(remarkRehype, { allowDangerousHtml: true })
   .use(CHAT_MARKDOWN_REHYPE_PLUGINS);
+const assistantBreaksProcessor = unified()
+  .use(remarkParse)
+  .use(CHAT_MARKDOWN_REMARK_PLUGINS_WITH_BREAKS)
+  .use(remarkRehype, { allowDangerousHtml: true })
+  .use(CHAT_MARKDOWN_REHYPE_PLUGINS);
 const userProcessor = unified()
   .use(remarkParse)
   .use(CHAT_MARKDOWN_REMARK_PLUGINS_WITH_BREAKS)
@@ -87,20 +98,26 @@ interface TextTree {
 }
 
 /** Uses the renderer's Markdown transforms, without mounting folded/virtualized rows. */
-function markdownThreadFindText(markdown: string, userMessage = false, cwd?: string): string[] {
-  const processor = userMessage ? userProcessor : assistantProcessor;
+function markdownThreadFindText(
+  markdown: string,
+  userMessage = false,
+  cwd?: string,
+  skills: readonly InlineSkill[] = [],
+  lineBreaks = false,
+): string[] {
+  const processor = userMessage
+    ? userProcessor
+    : lineBreaks
+      ? assistantBreaksProcessor
+      : assistantProcessor;
   const tree = processor.runSync(processor.parse(markdown));
-  const paths = userMessage
-    ? []
-    : [
-        ...extractMarkdownLinkHrefs(renderCodexFileCitationsAsMarkdown(markdown)),
-        ...extractInlineCodeSpans(markdown).flatMap(
-          (span) => inlineCodeFilePathCandidate(span) ?? [],
-        ),
-      ].flatMap((href) => {
-        const target = resolveMarkdownFileLinkTarget(href, cwd);
-        return target ? [splitFilePathPosition(target).path] : [];
-      });
+  const paths = [
+    ...extractMarkdownLinkHrefs(renderCodexFileCitationsAsMarkdown(markdown)),
+    ...extractInlineCodeSpans(markdown).flatMap((span) => inlineCodeFilePathCandidate(span) ?? []),
+  ].flatMap((href) => {
+    const target = resolveMarkdownFileLinkTarget(href, cwd);
+    return target ? [splitFilePathPosition(target).path] : [];
+  });
   const parentSuffixes = buildFileLinkParentSuffixByPath(paths);
   const segments: string[] = [];
   let text = "";
@@ -108,13 +125,13 @@ function markdownThreadFindText(markdown: string, userMessage = false, cwd?: str
     if (text.trim()) segments.push(text);
     text = "";
   };
-  const visit = (node: TextTree, inPre = false) => {
+  const visit = (node: TextTree, inPre = false, inlineSkills = false) => {
     const href = node.properties?.href ?? node.properties?.src;
     if (userMessage && typeof href === "string" && parseComposerContextHref(href)) {
       flush();
       return;
     }
-    if (!userMessage) {
+    {
       let candidate: string | null = null;
       if (node.tagName === "a" && typeof href === "string") {
         candidate = href;
@@ -141,9 +158,24 @@ function markdownThreadFindText(markdown: string, userMessage = false, cwd?: str
     const block = THREAD_FIND_BLOCK_TAGS.has(node.tagName ?? "");
     if (block) flush();
     if (node.type === "text" || (userMessage && node.type === "raw")) {
-      text += inPre ? (node.value ?? "") : (node.value ?? "").replace(/\r?\n/g, " ");
+      let value = node.value ?? "";
+      if (inlineSkills) {
+        let cursor = 0;
+        let rendered = "";
+        for (const { start, end, skill } of matchInlineSkills(value, skills)) {
+          rendered += value.slice(cursor, start) + formatProviderSkillDisplayName(skill);
+          cursor = end;
+        }
+        value = rendered + value.slice(cursor);
+      }
+      text += inPre ? value : value.replace(/\r?\n/g, " ");
     }
-    for (const child of node.children ?? []) visit(child, inPre || node.tagName === "pre");
+    const renderSkills =
+      node.tagName === "code" || node.tagName === "a"
+        ? false
+        : inlineSkills || node.tagName === "p" || node.tagName === "li";
+    for (const child of node.children ?? [])
+      visit(child, inPre || node.tagName === "pre", renderSkills);
     if (block) flush();
   };
   visit(tree);
@@ -151,25 +183,32 @@ function markdownThreadFindText(markdown: string, userMessage = false, cwd?: str
   return segments;
 }
 
-export function searchablePlanSegments(markdown: string, cwd?: string): readonly string[] {
+export function searchablePlanSegments(
+  markdown: string,
+  cwd?: string,
+  skills: readonly InlineSkill[] = [],
+): readonly string[] {
   return [
     proposedPlanTitle(markdown) ?? "Proposed plan",
-    ...markdownThreadFindText(stripDisplayedPlanMarkdown(markdown), false, cwd),
+    ...markdownThreadFindText(stripDisplayedPlanMarkdown(markdown), false, cwd, skills),
   ];
 }
 
 export function searchableMessageSegments(
   message: Pick<OrchestrationV2ConversationMessage, "role" | "text" | "streaming" | "context">,
   cwd?: string,
+  skills: readonly InlineSkill[] = [],
 ): readonly string[] | null {
   if (message.role === "user") {
     const text = message.context ? message.text : upgradeLegacyContextMessage(message.text).text;
-    return markdownThreadFindText(text, true);
+    return markdownThreadFindText(text, true, cwd, skills);
   }
   if (message.role !== "assistant") return null;
   return markdownThreadFindText(
     message.text || (message.streaming ? "" : "(empty response)"),
     false,
     cwd,
+    skills,
+    shouldPreserveAssistantLineBreaks(message.text),
   );
 }

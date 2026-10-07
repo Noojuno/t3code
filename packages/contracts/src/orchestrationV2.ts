@@ -3487,6 +3487,15 @@ export class OrchestrationGetWorkflowScriptError extends Schema.TaggedError<Orch
 
 export const OrchestrationV2SearchThreadInput = Schema.Struct({
   threadId: ThreadId,
+  // Match the skill labels displayed by this client, including custom display names.
+  skills: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({
+        name: Schema.String,
+        displayName: Schema.optional(Schema.String),
+      }),
+    ),
+  ),
   query: TrimmedNonEmptyString.check(Schema.isMaxLength(200)),
   index: Schema.optionalKey(NonNegativeInt),
 });

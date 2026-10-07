@@ -1,14 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import type { CitationHistoryPage } from "./useAssistantCitationTarget";
 
-type FindHistoryPage = Omit<CitationHistoryPage, "onLoadEarlier"> & {
-  readonly onLoadEarlier: () => boolean;
-};
-
 /** Search needs every history page, but leaves row mounting to the virtual list. */
 export function useThreadFindHistory(
   requestKey: string | null,
-  page: FindHistoryPage | null,
+  page: CitationHistoryPage | null,
 ): "loading" | "incomplete" | null {
   const requested = useRef<{ key: string; cursors: Set<string>; loading: boolean } | null>(null);
   const [failedKey, setFailedKey] = useState<string | null>(null);
@@ -34,7 +30,7 @@ export function useThreadFindHistory(
       return;
     }
     requested.current.cursors.add(cursor);
-    if (!page.onLoadEarlier()) setFailedKey(requestKey);
+    page.onLoadEarlier();
   }, [failedKey, page, requestKey]);
 
   if (requestKey === null || page === null) return null;

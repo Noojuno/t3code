@@ -964,7 +964,8 @@ function MarkdownMermaidCodeBlock({
   children: ReactNode;
 }) {
   const [showCode, setShowCode] = useState(false);
-  const showDiagram = !showCode && !isStreaming && code.trim().length > 0;
+  const searching = use(MarkdownFindContext);
+  const showDiagram = !searching && !showCode && !isStreaming && code.trim().length > 0;
   const toggleLabel = showCode ? "Show diagram" : "Show code";
   return (
     <MarkdownCodeBlock

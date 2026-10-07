@@ -1,3 +1,4 @@
+import { shouldPreserveAssistantLineBreaks } from "@t3tools/shared/markdownPipeline";
 import { ThreadId, type WorktreeSetupSnapshot } from "@t3tools/contracts";
 import {
   CheckpointRef,
@@ -28,7 +29,6 @@ import {
   resolveAssistantMessageCopyState,
   resolveWorkGroupScrollIndex,
   shouldFollowWorkGroupAppend,
-  shouldPreserveAssistantLineBreaks,
   type MessagesTimelineRow,
   resolveTimelineToolPresentation,
   workEntryDisplayLabel,

@@ -446,6 +446,10 @@
     "./fileLinks": {
       "types": "./src/fileLinks.ts",
       "import": "./src/fileLinks.ts"
+    },
+    "./inlineSkills": {
+      "types": "./src/inlineSkills.ts",
+      "import": "./src/inlineSkills.ts"
     }
   },
   "scripts": {

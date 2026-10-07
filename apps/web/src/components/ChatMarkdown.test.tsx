@@ -1,6 +1,11 @@
 // @vitest-environment jsdom
 
 import { EnvironmentId, type AuthEnvironmentScope } from "@t3tools/contracts";
+import { createRoot } from "react-dom/client";
+import { useThreadFindHighlights } from "./chat/threadFindHighlights";
+import { searchableMessageSegments } from "@t3tools/shared/threadFindText";
+import { countThreadSearchOccurrences } from "@t3tools/shared/threadSearch";
+
 import { MarkdownFindContext } from "./chat/markdownFindContext";
 import { act, type ComponentProps, type ReactNode } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -1095,3 +1100,89 @@ it("opens nested disclosures for find and restores their prior state when find c
     vi.unstubAllGlobals();
   }
 });
+
+it.each([
+  {
+    text: "```mermaid\ngraph TD; SearchSourceAlpha-->B\n```",
+    query: "SearchSourceAlpha",
+    count: 1,
+  },
+  {
+    text: "★ Insight ─────\nfirst line\nsecond line",
+    query: "first line second",
+    count: 0,
+    lineBreaks: true,
+  },
+  { text: "Use $test-t3-app now", query: "T3 App Testing", count: 1 },
+  { text: "`/tmp/file.ts:42`", query: "file.ts · L42", count: 1, user: true, lineBreaks: true },
+  { text: "> [!NOTE]\n> Searchable alert", query: "Searchable alert", count: 1 },
+  {
+    text: "<details><summary>Folded</summary><p>Hidden needle</p></details>",
+    query: "Hidden needle",
+    count: 1,
+  },
+])(
+  "highlights the indexed occurrences in $text",
+  async ({ text, query, count, lineBreaks, user }) => {
+    const skills = [{ name: "test-t3-app", displayName: "T3 App Testing" }];
+    const highlights = new Map<string, Set<Range>>();
+    vi.stubGlobal(
+      "Highlight",
+      class extends Set<Range> {
+        constructor(...ranges: Range[]) {
+          super(ranges);
+        }
+      },
+    );
+    vi.stubGlobal("CSS", { highlights, escape: (value: string) => value });
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    function Probe() {
+      useThreadFindHighlights({
+        container,
+        query,
+        activeRowId: "row",
+        activeOccurrence: 0,
+        onActiveRange: () => {},
+      });
+      return (
+        <div data-timeline-row-id="row">
+          <div data-thread-find-text>
+            <MarkdownFindContext value={true}>
+              <ChatMarkdown
+                text={text}
+                cwd={undefined}
+                skills={skills}
+                lineBreaks={lineBreaks ?? false}
+                parseRawHtml={!user}
+              />
+            </MarkdownFindContext>
+          </div>
+        </div>
+      );
+    }
+    try {
+      await act(() => root.render(<Probe />));
+      await act(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+      const ranges = [...highlights.values()].flatMap((value) => [...value]);
+      expect(ranges.map((range) => range.toString())).toEqual(
+        Array.from({ length: count }, () => query),
+      );
+      const segments =
+        searchableMessageSegments(
+          { role: user ? "user" : "assistant", text, streaming: false },
+          undefined,
+          skills,
+        ) ?? [];
+      expect(
+        segments.reduce((sum, segment) => sum + countThreadSearchOccurrences(segment, query), 0),
+      ).toBe(count);
+    } finally {
+      await act(() => root.unmount());
+      container.remove();
+      vi.unstubAllGlobals();
+    }
+  },
+);

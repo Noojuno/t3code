@@ -50,7 +50,7 @@ afterEach(async () => {
 
 describe("thread find history loading", () => {
   it("loads sequential pages without duplicate requests and finishes only at the oldest page", async () => {
-    const load = vi.fn(() => true);
+    const load = vi.fn();
     const page = { cursor: "recent", loading: false, onLoadEarlier: load };
     await render("thread:1", page);
     await render("thread:1", { ...page });
@@ -69,7 +69,7 @@ describe("thread find history loading", () => {
   });
 
   it("does not loop on a failed page and allows an explicit retry", async () => {
-    const load = vi.fn(() => true);
+    const load = vi.fn();
     const page = { cursor: "recent", loading: false, onLoadEarlier: load };
     await render("thread:1", page);
     await render("thread:1", { ...page, loading: true });
@@ -81,15 +81,8 @@ describe("thread find history loading", () => {
     expect(load).toHaveBeenCalledTimes(2);
   });
 
-  it("offers retry if the thread cannot start a history request", async () => {
-    const load = vi.fn(() => false);
-    await render("thread:1", { cursor: "recent", loading: false, onLoadEarlier: load });
-    expect(status).toBe("incomplete");
-    expect(load).toHaveBeenCalledTimes(1);
-  });
-
   it("stops when find closes or the query clears, and isolates requests between threads", async () => {
-    const load = vi.fn(() => true);
+    const load = vi.fn();
     const page = { cursor: "recent", loading: false, onLoadEarlier: load };
     await render(null, page);
     expect(load).not.toHaveBeenCalled();
