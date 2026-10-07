@@ -18,6 +18,10 @@ import { Button } from "./ui/button";
 import { setMarkdownTaskChecked } from "./files/filePreviewMode";
 
 vi.mock("@effect/atom-react", () => ({ useAtomValue: () => null }));
+vi.mock("./chat/MermaidDiagram", () => ({
+  // Real Mermaid needs layout APIs jsdom lacks; a rendered diagram is an SVG.
+  MermaidDiagram: () => <svg aria-label="Diagram" />,
+}));
 vi.mock("../hooks/useTheme", () => ({ useTheme: () => ({ resolvedTheme: "dark" }) }));
 vi.mock("../hooks/useSettings", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../hooks/useSettings")>();
@@ -1041,62 +1045,128 @@ describe("ChatMarkdown Windows file links", () => {
   });
 });
 
-it("opens nested disclosures for find and restores their prior state when find closes", async () => {
+it("opens a disclosure only when find selects a match inside it", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
-  let renderer: ReactTestRenderer | undefined;
-  const render = (searching: boolean) => (
-    <MarkdownFindContext value={searching}>
-      <ChatMarkdown
-        cwd={undefined}
-        text="<details><summary>Outer</summary><details><summary>Inner</summary><p>needle</p></details></details>"
-      />
-    </MarkdownFindContext>
+  vi.stubGlobal(
+    "Highlight",
+    class extends Set<Range> {
+      constructor(...ranges: Range[]) {
+        super(ranges);
+      }
+    },
   );
+  const highlights = new Map<string, Set<Range>>();
+  vi.stubGlobal("CSS", { highlights, escape: (value: string) => value });
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  const openStates = () =>
+    [...container.querySelectorAll("[data-markdown-details-open]")].map((node) =>
+      node.getAttribute("data-markdown-details-open"),
+    );
+  function Probe({ activeOccurrence }: { activeOccurrence: number }) {
+    useThreadFindHighlights({
+      container,
+      query: "needle",
+      activeRowId: "row",
+      activeOccurrence,
+      onActiveRange: () => {},
+    });
+    return (
+      <div data-timeline-row-id="row">
+        <div data-thread-find-text>
+          <MarkdownFindContext value={true}>
+            <ChatMarkdown
+              cwd={undefined}
+              text={[
+                "Visible needle.",
+                "<details><summary>Unrelated</summary><p>nothing here</p></details>",
+                "<details><summary>Outer</summary><details><summary>Inner</summary><p>needle</p></details></details>",
+              ].join("\n\n")}
+            />
+          </MarkdownFindContext>
+        </div>
+      </div>
+    );
+  }
+  const frame = () =>
+    act(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
   try {
-    await act(async () => {
-      renderer = create(render(false));
-    });
-    expect(JSON.stringify(renderer!.toJSON())).not.toContain("needle");
-    await act(async () => {
-      renderer!.update(render(true));
-    });
-    expect(JSON.stringify(renderer!.toJSON())).toContain("needle");
-    await act(async () => {
-      renderer!.update(render(false));
-    });
+    await act(() => root.render(<Probe activeOccurrence={0} />));
+    await frame();
+    // Selecting the visible match opens nothing; the folded one is counted but not painted.
+    expect(openStates()).toEqual(["false", "false", "false"]);
+    expect(container.textContent).toContain("nothing here");
     expect(
-      renderer!.root
-        .findAll(
-          (node) => node.type === "button" && node.props["data-markdown-details-summary"] === "",
-        )
-        .every((node) => node.props["aria-expanded"] === false),
-    ).toBe(true);
-    const trigger = renderer!.root.findAll(
-      (node) => node.type === "button" && node.props["data-markdown-details-summary"] === "",
-    )[0]!;
-    await act(async () => {
-      trigger.props.onClick({ nativeEvent: new Event("click") });
-    });
-    await act(async () => {
-      renderer!.update(render(true));
-    });
-    await act(async () => {
-      renderer!.update(render(false));
-    });
-    expect(
-      renderer!.root.findAllByProps({ "data-markdown-details-open": "true" }).length,
-    ).toBeGreaterThan(0);
-    expect(
-      renderer!.root
-        .findAll(
-          (node) => node.type === "button" && node.props["data-markdown-details-summary"] === "",
-        )
-        .map((node) => node.props["aria-expanded"]),
-    ).toEqual([true, false]);
+      [...(highlights.get("t3-thread-find-active") ?? [])].map((range) => range.toString()),
+    ).toEqual(["needle"]);
+    expect(highlights.get("t3-thread-find")?.size).toBe(0);
+
+    await act(() => root.render(<Probe activeOccurrence={1} />));
+    await frame();
+    await frame();
+    // Stepping to the folded match opens its two ancestors, not the unrelated one.
+    expect(openStates()).toEqual(["false", "true", "true"]);
+    expect(highlights.get("t3-thread-find-active")?.size).toBe(1);
   } finally {
-    await act(async () => {
-      renderer?.unmount();
+    await act(() => root.unmount());
+    container.remove();
+    vi.unstubAllGlobals();
+  }
+});
+
+it("keeps Mermaid diagrams rendered until find selects a match in their source", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  vi.stubGlobal(
+    "Highlight",
+    class extends Set<Range> {
+      constructor(...ranges: Range[]) {
+        super(ranges);
+      }
+    },
+  );
+  const highlights = new Map<string, Set<Range>>();
+  vi.stubGlobal("CSS", { highlights, escape: (value: string) => value });
+  const container = document.createElement("div");
+  document.body.append(container);
+  const root = createRoot(container);
+  const diagram = "```mermaid\ngraph TD; Alpha-->Beta\n```";
+  function Probe({ query }: { query: string }) {
+    useThreadFindHighlights({
+      container,
+      query,
+      activeRowId: "row",
+      activeOccurrence: 0,
+      onActiveRange: () => {},
     });
+    return (
+      <div data-timeline-row-id="row">
+        <div data-thread-find-text>
+          <MarkdownFindContext value={true}>
+            <ChatMarkdown cwd={undefined} text={`Needle first.\n\n${diagram}\n\n${diagram}`} />
+          </MarkdownFindContext>
+        </div>
+      </div>
+    );
+  }
+  const frame = () =>
+    act(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+  const diagrams = () => container.querySelectorAll('svg[aria-label="Diagram"]').length;
+  try {
+    await act(() => root.render(<Probe query="Needle" />));
+    await frame();
+    expect(diagrams()).toBe(2);
+    await act(() => root.render(<Probe query="Alpha" />));
+    await frame();
+    await frame();
+    // Only the diagram holding the selected match switches to source.
+    expect(diagrams()).toBe(1);
+    expect(
+      [...(highlights.get("t3-thread-find-active") ?? [])].map((range) => range.toString()),
+    ).toEqual(["Alpha"]);
+  } finally {
+    await act(() => root.unmount());
+    container.remove();
     vi.unstubAllGlobals();
   }
 });

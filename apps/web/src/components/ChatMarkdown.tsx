@@ -1,4 +1,4 @@
-import { MarkdownFindContext } from "./chat/markdownFindContext";
+import { MarkdownFindContext, useFindRevealRef } from "./chat/markdownFindContext";
 import {
   buildFileLinkParentSuffixByPath,
   fileLinkLabel,
@@ -690,7 +690,7 @@ function MarkdownDetails({
 }: Pick<React.ComponentProps<"details">, "children" | "open">) {
   const [isOpen, setIsOpen] = useState(open);
   const searching = use(MarkdownFindContext);
-  const expanded = searching || isOpen;
+  const expanded = isOpen;
   const childNodes = Children.toArray(children);
   const summaryIndex = childNodes.findIndex(
     (child) => isValidElement(child) && child.type === "summary",
@@ -720,7 +720,8 @@ function MarkdownDetails({
           />
           <span>{summary}</span>
         </CollapsibleTrigger>
-        <CollapsiblePanel>
+        {/* Base UI opens an until-found panel on `beforematch`. */}
+        <CollapsiblePanel hiddenUntilFound={searching}>
           <div
             className="pb-3 ps-6 text-foreground/[calc(80%+var(--appearance-contrast-boost)/5)]"
             data-markdown-details-content=""
@@ -969,7 +970,9 @@ function MarkdownMermaidCodeBlock({
 }) {
   const [showCode, setShowCode] = useState(false);
   const searching = use(MarkdownFindContext);
-  const showDiagram = !searching && !showCode && !isStreaming && code.trim().length > 0;
+  const revealSource = useCallback(() => setShowCode(true), []);
+  const sourceRevealRef = useFindRevealRef(revealSource);
+  const showDiagram = !showCode && !isStreaming && code.trim().length > 0;
   const toggleLabel = showCode ? "Show diagram" : "Show code";
   return (
     <MarkdownCodeBlock
@@ -1012,6 +1015,12 @@ function MarkdownMermaidCodeBlock({
           >
             <MermaidDiagram source={code} theme={theme} onExpand={onExpand} />
           </Suspense>
+          {/* Find counts the source; a selected match here switches to it. */}
+          {searching ? (
+            <pre ref={sourceRevealRef} hidden>
+              {code}
+            </pre>
+          ) : null}
         </RenderErrorBoundary>
       ) : (
         children

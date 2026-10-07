@@ -1,5 +1,6 @@
 import { proposedPlanTitle, stripDisplayedPlanMarkdown } from "@t3tools/shared/proposedPlanText";
-import { memo, useState, useId } from "react";
+import { memo, useCallback, useState, useId } from "react";
+import { useFindRevealRef } from "./markdownFindContext";
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -43,14 +44,14 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
   threadRef,
   cwd,
   workspaceRoot,
-  expandForFind = false,
+  findActive = false,
 }: {
   planMarkdown: string;
   environmentId: EnvironmentId;
   threadRef?: ScopedThreadRef | undefined;
   cwd: string | undefined;
   workspaceRoot: string | undefined;
-  expandForFind?: boolean;
+  findActive?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
   const canWriteFiles = useEnvironmentScope(environmentId, AuthFilesystemWriteScope);
@@ -80,7 +81,12 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
   const collapsedPreview = canCollapse
     ? buildCollapsedProposedPlanPreviewMarkdown(planMarkdown, { maxLines: 10 })
     : null;
-  const isCollapsed = canCollapse && !expanded && !expandForFind;
+  const isCollapsed = canCollapse && !expanded;
+  // While finding, the full plan stays mounted but clipped, so a match past the
+  // preview can be counted and then opened only once it is selected.
+  const showPreview = isCollapsed && !findActive;
+  const revealForFind = useCallback(() => setExpanded(true), []);
+  const findRevealRef = useFindRevealRef(revealForFind);
   const downloadFilename = buildProposedPlanMarkdownFilename(planMarkdown);
   const saveContents = normalizePlanMarkdownForExport(planMarkdown);
 
@@ -187,10 +193,12 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
       </div>
       <div className="mt-4">
         <div
+          ref={findRevealRef}
           className={cn("relative", isCollapsed && "max-h-104 overflow-hidden")}
           data-thread-find-text="true"
+          data-thread-find-fold={isCollapsed ? "" : undefined}
         >
-          {isCollapsed ? (
+          {showPreview ? (
             <ChatMarkdown
               text={collapsedPreview ?? ""}
               cwd={cwd}
@@ -213,7 +221,7 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
             <div className="pointer-events-none absolute inset-x-0 bottom-0 h-24 bg-linear-to-t from-card/95 via-card/80 to-transparent" />
           ) : null}
         </div>
-        {canCollapse && !expandForFind ? (
+        {canCollapse ? (
           <div className="mt-4 flex justify-center">
             <Button
               size="sm"

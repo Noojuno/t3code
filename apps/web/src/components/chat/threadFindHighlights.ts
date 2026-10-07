@@ -68,6 +68,34 @@ export function collectThreadFindRanges(container: HTMLElement, query: string): 
   return ranges;
 }
 
+/** Ancestors that hide (`hidden`) or clip (`data-thread-find-fold`) text until find opens them. */
+const FOLD_SELECTOR = "[hidden], [data-thread-find-fold]";
+
+/** Folds around the range that currently keep it out of sight, innermost first. */
+function foldsHiding(range: Range, container: HTMLElement): Element[] {
+  const folds: Element[] = [];
+  for (
+    let fold = range.startContainer.parentElement?.closest(FOLD_SELECTOR);
+    fold && container.contains(fold);
+    fold = fold.parentElement?.closest(FOLD_SELECTOR)
+  ) {
+    // A clipped body still shows its first lines; only text past the cutoff is folded.
+    if (
+      fold.hasAttribute("hidden") ||
+      range.getBoundingClientRect().bottom > fold.getBoundingClientRect().bottom
+    )
+      folds.push(fold);
+  }
+  return folds;
+}
+
+/** Dispatches `beforematch` on each fold hiding the range; returns whether any existed. */
+function revealFolded(range: Range, container: HTMLElement): boolean {
+  const folds = foldsHiding(range, container);
+  for (const fold of folds) fold.dispatchEvent(new Event("beforematch"));
+  return folds.length > 0;
+}
+
 export function useThreadFindHighlights(input: {
   readonly container: HTMLElement | null;
   readonly query: string;
@@ -102,11 +130,18 @@ export function useThreadFindHighlights(input: {
           match.occurrence === activeOccurrence
         ) {
           active = match.range;
-        } else {
+        } else if (foldsHiding(match.range, container).length === 0) {
           inactive.push(match.range);
         }
       }
-      onActiveRange(active);
+      // Folded text still counts; only the selected occurrence opens its folds.
+      // The resulting DOM change repaints through the observer below.
+      if (active && revealFolded(active, container)) {
+        onActiveRange(null);
+        active = null;
+      } else {
+        onActiveRange(active);
+      }
       CSS.highlights.set(THREAD_FIND_HIGHLIGHT_NAME, new Highlight(...inactive));
       CSS.highlights.set(
         THREAD_FIND_ACTIVE_HIGHLIGHT_NAME,
@@ -128,7 +163,7 @@ export function useThreadFindHighlights(input: {
       childList: true,
       characterData: true,
       attributes: true,
-      attributeFilter: ["data-wrap"],
+      attributeFilter: ["data-wrap", "hidden", "data-thread-find-fold"],
     });
     return () => {
       observer.disconnect();
