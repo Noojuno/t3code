@@ -195,6 +195,59 @@ const setup = Effect.gen(function* () {
 });
 
 describe("V2 thread find", () => {
+  it.effect("cycles relative to the current match when new matches are inserted", () =>
+    Effect.gen(function* () {
+      const projection = yield* setup;
+      yield* putItems([
+        item("first", 10, "needle"),
+        item("current", 20, "needle"),
+        item("last", 30, "needle"),
+      ]);
+      const initial = yield* projection.searchThread({ threadId, query: "needle", index: 1 });
+      assert.equal(initial.match?.entryId, "current");
+      yield* putItems([
+        item("new-before", 15, "needle"),
+        item("new-after", 25, "needle"),
+        item("new-last", 40, "needle"),
+      ]);
+      const start = { entryId: "current", occurrence: 0 };
+      const refreshed = yield* projection.searchThread({ threadId, query: "needle", start });
+      assert.equal(refreshed.totalMatches, 6);
+      assert.equal(refreshed.activeIndex, 2);
+      assert.equal(refreshed.match?.entryId, "current");
+      const next = yield* projection.searchThread({ threadId, query: "needle", start, offset: 1 });
+      assert.equal(next.match?.entryId, "new-after");
+      const previous = yield* projection.searchThread({
+        threadId,
+        query: "needle",
+        start,
+        offset: -1,
+      });
+      assert.equal(previous.match?.entryId, "new-before");
+      const end = yield* projection.searchThread({
+        threadId,
+        query: "needle",
+        start: { entryId: "last", occurrence: 0 },
+        offset: 1,
+      });
+      assert.equal(end.match?.entryId, "new-last");
+      const wrapped = yield* projection.searchThread({
+        threadId,
+        query: "needle",
+        start: { entryId: "new-last", occurrence: 0 },
+        offset: 1,
+      });
+      assert.equal(wrapped.match?.entryId, "first");
+      const backwards = yield* projection.searchThread({
+        threadId,
+        query: "needle",
+        start: { entryId: "first", occurrence: 0 },
+        offset: -1,
+      });
+      assert.equal(backwards.match?.entryId, "new-last");
+    }).pipe(Effect.provide(layerTest)),
+  );
+
   it.effect("reuses parses of large messages across navigation, edits, and new queries", () =>
     Effect.gen(function* () {
       const projection = yield* setup;
@@ -515,6 +568,36 @@ describe("V2 thread find", () => {
       yield* commit([{ ...deleted, id: EventId.make("deleted"), type: "thread.deleted" }]);
       const error = yield* Effect.flip(projection.searchThread({ threadId, query: "needle" }));
       assert.equal(error._tag, "ProjectionStoreThreadNotFoundError");
+    }).pipe(Effect.provide(layerTest)),
+  );
+
+  it.effect("invalidates a cached fork search when its empty source gains its first message", () =>
+    Effect.gen(function* () {
+      const projection = yield* setup;
+      const parent = ThreadId.make("thread:empty-parent");
+      const parentRun = RunId.make("run:empty-parent");
+      yield* commit([thread(parent, projectId), run(parent, parentRun)]);
+      const child = thread(threadId, projectId);
+      if (child.type !== "thread.created") return;
+      yield* commit([
+        {
+          ...child,
+          id: EventId.make("child:empty-fork"),
+          type: "thread.metadata-updated",
+          payload: {
+            ...child.payload,
+            forkedFrom: { type: "run", threadId: parent, runId: parentRun },
+          },
+        },
+      ]);
+      yield* putItems([item("local", 1, "needle")]);
+      assert.equal((yield* projection.searchThread({ threadId, query: "needle" })).totalMatches, 1);
+      yield* putItems([
+        { ...item("inherited", 1, "needle", "assistant_message", parent), runId: parentRun },
+      ]);
+      const updated = yield* projection.searchThread({ threadId, query: "needle" });
+      assert.equal(updated.totalMatches, 2);
+      assert.equal(updated.match?.entryId, "inherited");
     }).pipe(Effect.provide(layerTest)),
   );
 

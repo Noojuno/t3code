@@ -1,5 +1,5 @@
 import { findThreadSearchOccurrences } from "@t3tools/shared/threadSearch";
-import { useEffect } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import { THREAD_FIND_BLOCK_TAGS } from "@t3tools/shared/threadFindText";
 
 const THREAD_FIND_HIGHLIGHT_NAME = "t3-thread-find";
@@ -124,55 +124,64 @@ export function useThreadFindHighlights(input: {
 }): void {
   const { container, query, activeRowId, activeOccurrence, onActiveRange } = input;
 
+  const rangesRef = useRef<readonly ThreadFindRange[]>([]);
+  const selectionRef = useRef({ activeRowId, activeOccurrence, onActiveRange });
+  useLayoutEffect(() => {
+    selectionRef.current = { activeRowId, activeOccurrence, onActiveRange };
+  }, [activeRowId, activeOccurrence, onActiveRange]);
+
   useEffect(() => {
     if (typeof CSS === "undefined" || !CSS.highlights || typeof Highlight === "undefined") {
-      onActiveRange(null);
+      paintThreadFindHighlights([], selectionRef.current, container);
       return;
     }
     const clearHighlights = () => {
       CSS.highlights.delete(THREAD_FIND_HIGHLIGHT_NAME);
       CSS.highlights.delete(THREAD_FIND_ACTIVE_HIGHLIGHT_NAME);
     };
+    rangesRef.current = [];
     if (!container || query.length === 0) {
-      onActiveRange(null);
+      paintThreadFindHighlights([], selectionRef.current, container);
       clearHighlights();
       return;
     }
 
+    // Selection changes reuse ranges. Only changed or newly mounted rows
+    // need their text walked again; removed rows release their DOM references.
+    const cache = new Map<Element, readonly ThreadFindRange[]>();
     const repaint = () => {
-      let active: Range | null = null;
-      const inactive: Range[] = [];
-      for (const match of collectThreadFindRanges(container, query)) {
+      const rows = new Set(container.querySelectorAll("[data-timeline-row-id]"));
+      const ranges: ThreadFindRange[] = [];
+      for (const row of rows) {
+        let matches = cache.get(row);
         if (
-          active === null &&
-          match.rowId === activeRowId &&
-          match.occurrence === activeOccurrence
+          !matches ||
+          matches.some(
+            ({ range }) => !row.contains(range.startContainer) || !row.contains(range.endContainer),
+          )
         ) {
-          active = match.range;
-        } else if (foldsHiding(match.range, container).length === 0) {
-          inactive.push(match.range);
+          matches = collectThreadFindRanges(row as HTMLElement, query);
+          cache.set(row, matches);
         }
+        ranges.push(...matches);
       }
-      // Folded text still counts; only the selected occurrence opens its folds.
-      // The resulting DOM change repaints through the observer below.
-      if (active && revealFolded(active, container)) {
-        onActiveRange(null);
-        active = null;
-      } else {
-        onActiveRange(active);
-      }
-      CSS.highlights.set(THREAD_FIND_HIGHLIGHT_NAME, new Highlight(...inactive));
-      CSS.highlights.set(
-        THREAD_FIND_ACTIVE_HIGHLIGHT_NAME,
-        new Highlight(...(active ? [active] : [])),
-      );
+      for (const row of cache.keys()) if (!rows.has(row)) cache.delete(row);
+      rangesRef.current = ranges;
+      paintThreadFindHighlights(ranges, selectionRef.current, container);
     };
-    repaint();
-
     let frame: number | null = null;
-    const observer = new MutationObserver((records) => {
+    const observer = new MutationObserver((mutations) => {
       // Timers and status chrome tick every second; only searchable text and folds matter.
-      if (!records.some(affectsSearchableText)) return;
+      const relevant = mutations.filter(affectsSearchableText);
+      if (relevant.length === 0) return;
+      for (const mutation of relevant) {
+        const target =
+          mutation.target.nodeType === 1
+            ? (mutation.target as Element)
+            : mutation.target.parentElement;
+        const row = target?.closest("[data-timeline-row-id]");
+        if (row) cache.delete(row);
+      }
       if (frame !== null) return;
       frame = requestAnimationFrame(() => {
         frame = null;
@@ -184,12 +193,70 @@ export function useThreadFindHighlights(input: {
       childList: true,
       characterData: true,
       attributes: true,
-      attributeFilter: ["data-wrap", "hidden", "data-thread-find-fold"],
+      attributeFilter: [
+        "data-wrap",
+        "hidden",
+        "data-thread-find-fold",
+        "data-timeline-row-id",
+        "data-thread-find-text",
+        "data-thread-find-ignore",
+      ],
     });
+    // Revealing the first match can synchronously mount or recycle list rows.
+    repaint();
     return () => {
       observer.disconnect();
       if (frame !== null) cancelAnimationFrame(frame);
+      cache.clear();
+      rangesRef.current = [];
       clearHighlights();
     };
-  }, [activeOccurrence, activeRowId, container, onActiveRange, query]);
+  }, [container, query]);
+
+  useEffect(() => {
+    if (typeof CSS !== "undefined" && CSS.highlights && typeof Highlight !== "undefined")
+      paintThreadFindHighlights(
+        rangesRef.current,
+        {
+          activeRowId,
+          activeOccurrence,
+          onActiveRange,
+        },
+        container,
+      );
+  }, [activeOccurrence, activeRowId, onActiveRange, container]);
+}
+
+function paintThreadFindHighlights(
+  ranges: readonly ThreadFindRange[],
+  selection: Pick<
+    Parameters<typeof useThreadFindHighlights>[0],
+    "activeRowId" | "activeOccurrence" | "onActiveRange"
+  >,
+  container: HTMLElement | null,
+) {
+  if (typeof CSS === "undefined" || !CSS.highlights || typeof Highlight === "undefined") {
+    selection.onActiveRange(null);
+    return;
+  }
+  let active: Range | null = null;
+  const inactive: Range[] = [];
+  for (const match of ranges) {
+    if (
+      active === null &&
+      match.rowId === selection.activeRowId &&
+      match.occurrence === selection.activeOccurrence
+    )
+      active = match.range;
+    else if (container && foldsHiding(match.range, container).length === 0)
+      inactive.push(match.range);
+  }
+  if (active && container && revealFolded(active, container)) {
+    selection.onActiveRange(null);
+    active = null;
+  } else {
+    selection.onActiveRange(active);
+  }
+  CSS.highlights.set(THREAD_FIND_HIGHLIGHT_NAME, new Highlight(...inactive));
+  CSS.highlights.set(THREAD_FIND_ACTIVE_HIGHLIGHT_NAME, new Highlight(...(active ? [active] : [])));
 }

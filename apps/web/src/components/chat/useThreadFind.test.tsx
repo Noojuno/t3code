@@ -15,6 +15,7 @@ import { requestThreadFindOpen } from "./threadFindActionBus";
 const queries = vi.hoisted(() => ({
   results: new Map<string, OrchestrationV2SearchThreadResult>(),
   pending: false,
+  refresh: vi.fn(),
 }));
 vi.mock("~/state/orchestration", () => ({
   orchestrationEnvironment: {
@@ -29,7 +30,7 @@ vi.mock("~/state/query", () => ({
     data: atom === null ? null : (queries.results.get(atom.environmentId) ?? null),
     isPending: queries.pending,
     error: null,
-    refresh: () => {},
+    refresh: queries.refresh,
   }),
 }));
 
@@ -44,14 +45,16 @@ const runId = RunId.make("run:plan");
 function Probe({
   environmentId,
   enabled = true,
+  content,
 }: {
   environmentId: EnvironmentId;
   enabled?: boolean;
+  content?: Parameters<typeof useThreadFind>[0]["content"];
 }) {
   const state = useThreadFind({
     thread: { environmentId, threadId },
     enabled,
-    content: undefined,
+    content,
   });
   useLayoutEffect(() => {
     find = state;
@@ -68,6 +71,7 @@ afterEach(async () => {
   queries.results.clear();
   queries.pending = false;
   vi.clearAllMocks();
+  vi.useRealTimers();
   vi.unstubAllGlobals();
 });
 
@@ -106,12 +110,135 @@ describe("V2 find state", () => {
     await act(async () => find.barProps.onNext());
     expect(orchestrationEnvironment.threadFind).toHaveBeenLastCalledWith({
       environmentId: a,
-      input: { threadId, query: "COD4", skills: [], index: 5 },
+      input: {
+        threadId,
+        query: "COD4",
+        skills: [],
+        start: { entryId: "message:6", occurrence: 0 },
+        offset: 1,
+      },
     });
     expect(find.timelineProps.activeFindMatch?.entryId).toBe("message:7");
     queries.results.set(a, messageResult(4));
     await act(async () => find.barProps.onPrevious());
     expect(find.barProps.activeIndex).toBe(4);
+    expect(orchestrationEnvironment.threadFind).toHaveBeenLastCalledWith({
+      environmentId: a,
+      input: {
+        threadId,
+        query: "COD4",
+        skills: [],
+        start: { entryId: "message:7", occurrence: 0 },
+        offset: -1,
+      },
+    });
+  });
+
+  it("accumulates rapid navigation against the same match until the response arrives", async () => {
+    queries.results.set(a, messageResult(4));
+    await act(async () => {
+      renderer = create(<Probe environmentId={a} />);
+    });
+    await act(async () => find.open());
+    await act(async () => find.barProps.onQueryChange("COD4"));
+    queries.pending = true;
+    queries.results.delete(a);
+    await act(async () => find.barProps.onNext());
+    await act(async () => find.barProps.onNext());
+    expect(orchestrationEnvironment.threadFind).toHaveBeenLastCalledWith({
+      environmentId: a,
+      input: {
+        threadId,
+        query: "COD4",
+        skills: [],
+        start: { entryId: "message:6", occurrence: 0 },
+        offset: 2,
+      },
+    });
+    expect(find.timelineProps.findNavigationId).toBe(0);
+    queries.pending = false;
+    queries.results.set(a, messageResult(6));
+    await act(async () => renderer?.update(<Probe environmentId={a} />));
+    expect(find.timelineProps.findNavigationId).toBe(2);
+    expect(find.barProps.activeIndex).toBe(6);
+  });
+
+  it("refreshes continuous updates without shifting the current match or showing Searching", async () => {
+    vi.useFakeTimers();
+    queries.results.set(a, messageResult(4));
+    await act(async () => {
+      renderer = create(<Probe environmentId={a} />);
+    });
+    await act(async () => find.open());
+    await act(async () => find.barProps.onQueryChange("COD4"));
+    for (let i = 0; i < 3; i++) {
+      await act(async () =>
+        renderer?.update(<Probe environmentId={a} content={{ visibleTurnItems: [], runs: [] }} />),
+      );
+      await act(async () => vi.advanceTimersByTime(100));
+    }
+    expect(orchestrationEnvironment.threadFind).toHaveBeenLastCalledWith({
+      environmentId: a,
+      input: {
+        threadId,
+        query: "COD4",
+        skills: [],
+        start: { entryId: "message:6", occurrence: 0 },
+      },
+    });
+    const updated = { ...messageResult(5, 10), totalMatches: 11, match: messageResult(4).match };
+    queries.results.set(a, updated);
+    await act(async () => renderer?.update(<Probe environmentId={a} />));
+    expect(find.barProps.matchCount).toBe(11);
+    expect(find.barProps.activeIndex).toBe(5);
+    expect(find.timelineProps.activeFindMatch?.entryId).toBe("message:6");
+    expect(find.timelineProps.findNavigationId).toBe(0);
+    expect(find.barProps.status).toBeNull();
+    await act(async () => find.barProps.onNext());
+    expect(orchestrationEnvironment.threadFind).toHaveBeenLastCalledWith({
+      environmentId: a,
+      input: {
+        threadId,
+        query: "COD4",
+        skills: [],
+        start: { entryId: "message:6", occurrence: 0 },
+        offset: 1,
+      },
+    });
+  });
+
+  it("keeps pending navigation when incoming content triggers a refresh", async () => {
+    vi.useFakeTimers();
+    queries.results.set(a, messageResult(4));
+    await act(async () => {
+      renderer = create(<Probe environmentId={a} />);
+    });
+    await act(async () => find.open());
+    await act(async () => find.barProps.onQueryChange("COD4"));
+    queries.pending = true;
+    queries.results.delete(a);
+    await act(async () => find.barProps.onNext());
+    await act(async () =>
+      renderer?.update(<Probe environmentId={a} content={{ visibleTurnItems: [], runs: [] }} />),
+    );
+    await act(async () => vi.advanceTimersByTime(300));
+    expect(queries.refresh).toHaveBeenCalledTimes(1);
+    expect(orchestrationEnvironment.threadFind).toHaveBeenLastCalledWith({
+      environmentId: a,
+      input: {
+        threadId,
+        query: "COD4",
+        skills: [],
+        start: { entryId: "message:6", occurrence: 0 },
+        offset: 1,
+      },
+    });
+    queries.pending = false;
+    queries.results.set(a, { ...messageResult(6, 10), totalMatches: 11 });
+    await act(async () => renderer?.update(<Probe environmentId={a} />));
+    expect(find.timelineProps.activeFindMatch?.entryId).toBe("message:8");
+    expect(find.timelineProps.findNavigationId).toBe(1);
+    expect(find.barProps.matchCount).toBe(11);
   });
 
   it("does not navigate the previous result while a new match is loading", async () => {

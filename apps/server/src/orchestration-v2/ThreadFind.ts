@@ -112,7 +112,7 @@ function countSegments(segments: readonly string[], query: string) {
 
 function selectMatch(
   documents: readonly FindDocument[],
-  input: Pick<OrchestrationV2SearchThreadInput, "index" | "start">,
+  input: Pick<OrchestrationV2SearchThreadInput, "index" | "start" | "offset">,
 ) {
   const totalMatches = documents.reduce((sum, doc) => sum + doc.count, 0);
   let requestedIndex = input.index ?? 0;
@@ -125,7 +125,10 @@ function selectMatch(
       if (requestedIndex >= totalMatches) requestedIndex = 0;
     }
   }
-  const activeIndex = Math.min(requestedIndex, Math.max(0, totalMatches - 1));
+  const activeIndex =
+    input.index === undefined && totalMatches > 0
+      ? (((requestedIndex + (input.offset ?? 0)) % totalMatches) + totalMatches) % totalMatches
+      : Math.min(requestedIndex, Math.max(0, totalMatches - 1));
   let occurrence = activeIndex;
   for (const document of documents) {
     if (occurrence < document.count) return { totalMatches, activeIndex, document, occurrence };
@@ -240,7 +243,33 @@ export const makeThreadFind = Effect.fn("makeThreadFind")(function* (
   });
   // Scans retain counts and item references, never message bodies. Navigation checks
   // the current revision in its transaction without reloading message payloads.
-  const scans = new Map<string, { sequence: number; documents: readonly FindDocument[] }>();
+  const scans = new Map<
+    string,
+    {
+      sequence: number;
+      documents: readonly FindDocument[];
+      sourceThreadIds: readonly ThreadId[];
+    }
+  >();
+  const readRevision = Effect.fn("ThreadFind.readRevision")(function* (
+    threadIds: readonly ThreadId[],
+  ) {
+    const sources = yield* encodeThreadIds(threadIds);
+    const revision = yield* sql<{ sequence: number }>`
+      WITH RECURSIVE source_threads(thread_id) AS (
+        SELECT value FROM json_each(${sources})
+        UNION
+        SELECT json_extract(t.payload_json, '$.forkedFrom.threadId')
+        FROM orchestration_v2_projection_threads t
+        JOIN source_threads s ON s.thread_id = t.thread_id
+        WHERE json_extract(t.payload_json, '$.forkedFrom.type') = 'run'
+      )
+      SELECT COALESCE(MAX(sequence), 0) AS sequence FROM orchestration_events
+      WHERE application_event_version = 2 AND aggregate_kind = 'thread'
+        AND stream_id IN (SELECT thread_id FROM source_threads)
+    `;
+    return revision[0]?.sequence ?? 0;
+  });
   const snapshot = Effect.fn("ThreadFind.snapshot")(
     function* (input: OrchestrationV2SearchThreadInput) {
       const { threadId } = input;
@@ -250,17 +279,7 @@ export const makeThreadFind = Effect.fn("makeThreadFind")(function* (
       WHERE t.thread_id = ${threadId} AND t.deleted_at IS NULL AND p.deleted_at IS NULL
     `;
       if (!active[0]) return yield* new ProjectionStoreThreadNotFoundError({ threadId });
-      const index = yield* readIndex(threadId);
-      const sources = yield* encodeThreadIds([
-        ...new Set([threadId, ...index.map((row) => row.sourceThreadId)]),
-      ]);
-      const revision = yield* sql<{ sequence: number }>`
-      SELECT COALESCE(MAX(sequence), 0) AS sequence FROM orchestration_events
-      WHERE application_event_version = 2 AND aggregate_kind = 'thread'
-        AND stream_id IN (SELECT value FROM json_each(${sources}))
-    `;
       const cwd = active[0].cwd ?? undefined;
-      const sequence = revision[0]?.sequence ?? 0;
       const cacheKey = yield* encodeCacheKey({
         threadId,
         cwd,
@@ -268,12 +287,15 @@ export const makeThreadFind = Effect.fn("makeThreadFind")(function* (
         skills: input.skills ?? [],
       });
       const cached = scans.get(cacheKey);
-      if (cached?.sequence === sequence) {
+      if (cached && cached.sequence === (yield* readRevision(cached.sourceThreadIds))) {
         const selected = selectMatch(cached.documents, input);
         scans.delete(cacheKey);
         scans.set(cacheKey, cached);
-        return { result: resultForSelection(selected, sequence) };
+        return { result: resultForSelection(selected, cached.sequence) };
       }
+      const index = yield* readIndex(threadId);
+      const sourceThreadIds = [...new Set([threadId, ...index.map((row) => row.sourceThreadId)])];
+      const sequence = yield* readRevision(sourceThreadIds);
       const candidates = index
         .map((row, position) => ({ ...row, position }))
         .filter((row) =>
@@ -285,7 +307,7 @@ export const makeThreadFind = Effect.fn("makeThreadFind")(function* (
       for (let start = 0; start < candidates.length; start += 128) {
         payloads.push(...(yield* load(threadId, candidates.slice(start, start + 128))));
       }
-      return { payloads, cwd, sequence, cacheKey };
+      return { payloads, cwd, sequence, cacheKey, sourceThreadIds };
     },
     sql.withTransaction,
     (effect, input) =>
@@ -304,7 +326,7 @@ export const makeThreadFind = Effect.fn("makeThreadFind")(function* (
     // come from one snapshot, including inherited fork history.
     const data = yield* snapshot(input);
     if (data.result) return data.result;
-    const { payloads, cwd, sequence, cacheKey } = data;
+    const { payloads, cwd, sequence, cacheKey, sourceThreadIds } = data;
     // Decode after the snapshot so the write lock is not held for it.
     const items: OrchestrationV2ProjectedTurnItem[] = yield* Effect.forEach(
       payloads,
@@ -329,7 +351,7 @@ export const makeThreadFind = Effect.fn("makeThreadFind")(function* (
       yield* Effect.yieldNow;
     }
     scans.delete(cacheKey);
-    scans.set(cacheKey, { sequence, documents });
+    scans.set(cacheKey, { sequence, documents, sourceThreadIds });
     if (scans.size > 8) {
       const oldest = scans.keys().next().value;
       if (oldest !== undefined) scans.delete(oldest);

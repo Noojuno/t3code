@@ -3498,7 +3498,8 @@ export const OrchestrationV2SearchThreadInput = Schema.Struct({
   ),
   query: TrimmedNonEmptyString.check(Schema.isMaxLength(200)),
   index: Schema.optionalKey(NonNegativeInt),
-  // Used only before an explicit match index is selected.
+  // Select relative to an entry identity so updates before it do not shift navigation.
+  offset: Schema.optionalKey(Schema.Int),
   start: Schema.optionalKey(
     Schema.Struct({ entryId: TrimmedNonEmptyString, occurrence: NonNegativeInt }),
   ),

@@ -1,15 +1,11 @@
 import type { InlineSkill } from "@t3tools/shared/inlineSkills";
 import type { OrchestrationV2ThreadProjection, ScopedThreadRef } from "@t3tools/contracts";
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { orchestrationEnvironment } from "~/state/orchestration";
 import { useEnvironmentQuery } from "~/state/query";
 import { useDebouncedValue } from "~/state/queries";
-import {
-  stepThreadFindIndex,
-  type ThreadFindPositionReader,
-  type ThreadFindStart,
-} from "./threadFind";
+import { type ThreadFindPositionReader, type ThreadFindStart } from "./threadFind";
 import { subscribeThreadFindOpen } from "./threadFindActionBus";
 import { toastManager } from "../ui/toast";
 
@@ -18,7 +14,7 @@ const EMPTY_SKILLS: readonly InlineSkill[] = [];
 const CLOSED_FIND = {
   threadKey: null as string | null,
   query: "",
-  activeIndex: null as number | null,
+  offset: 0,
   start: undefined as ThreadFindStart | undefined,
   focusRequestId: 0,
   navigationId: 0,
@@ -64,10 +60,9 @@ export function useThreadFind({
   const remote = useServerResults(
     isOpen ? thread : null,
     state.query,
-    state.activeIndex,
+    state.offset,
     state.navigationId,
     state.start,
-    content,
     skills,
   );
   const status: "loading" | "error" | null = remote.error
@@ -77,15 +72,63 @@ export function useThreadFind({
       : null;
   const count = remote.data?.totalMatches ?? 0;
   const activeIndex = remote.data?.activeIndex ?? 0;
+  const match = remote.data?.match ?? null;
   const step = (delta: number) => {
-    // Before results arrive, stepping would replace the reading-position start with index 0.
     if (count === 0) return;
-    setState((previous) => ({
-      ...previous,
-      activeIndex: stepThreadFindIndex(previous.activeIndex ?? activeIndex, count, delta),
-      navigationId: previous.navigationId + 1,
-    }));
+    setState((previous) => {
+      const pending = previous.navigationId !== remote.navigationId;
+      return {
+        ...previous,
+        start:
+          pending || !match
+            ? previous.start
+            : { entryId: match.entryId, occurrence: match.occurrence },
+        offset: pending ? previous.offset + delta : delta,
+        navigationId: previous.navigationId + 1,
+      };
+    });
   };
+
+  // Refresh at most once per 300 ms, even while tokens continue arriving.
+  // An identity anchor keeps newly inserted matches from shifting the selection.
+  const refreshLiveResultsRef = useRef(() => {});
+  useLayoutEffect(() => {
+    refreshLiveResultsRef.current = () => {
+      if (!isOpen || !state.query.trim()) return;
+      if (!match || state.navigationId !== remote.navigationId) {
+        remote.refresh();
+        return;
+      }
+      const start = { entryId: match.entryId, occurrence: match.occurrence };
+      if (
+        state.offset === 0 &&
+        state.start?.entryId === start.entryId &&
+        state.start.occurrence === start.occurrence
+      ) {
+        remote.refresh();
+      } else {
+        setState((previous) => ({ ...previous, start, offset: 0 }));
+      }
+    };
+  });
+  const lastContentRef = useRef(content);
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (lastContentRef.current === content) return;
+    lastContentRef.current = content;
+    if (!isOpen || !state.query.trim() || refreshTimerRef.current !== null) return;
+    refreshTimerRef.current = setTimeout(() => {
+      refreshTimerRef.current = null;
+      refreshLiveResultsRef.current();
+    }, 300);
+  }, [content, isOpen, state.query]);
+  useEffect(() => {
+    if (!isOpen || threadKey === null || !state.query.trim()) return;
+    return () => {
+      if (refreshTimerRef.current !== null) clearTimeout(refreshTimerRef.current);
+      refreshTimerRef.current = null;
+    };
+  }, [threadKey, isOpen, state.query]);
 
   return {
     isOpen,
@@ -101,7 +144,7 @@ export function useThreadFind({
       onRetry: remote.refresh,
       onQueryChange: (query: string) => {
         const start = findPositionReaderRef.current?.(query.trim());
-        setState((previous) => ({ ...previous, query, activeIndex: null, start }));
+        setState((previous) => ({ ...previous, query, offset: 0, start }));
       },
       onNext: () => step(1),
       onPrevious: () => step(-1),
@@ -123,10 +166,9 @@ export function useThreadFind({
 function useServerResults(
   thread: ScopedThreadRef | null,
   query: string,
-  index: number | null,
+  offset: number,
   navigationId: number,
   start: ThreadFindStart | undefined,
-  content: Pick<OrchestrationV2ThreadProjection, "visibleTurnItems" | "runs"> | undefined,
   skills: readonly InlineSkill[],
 ) {
   const skillLabels = useMemo(
@@ -142,25 +184,15 @@ function useServerResults(
           input: {
             threadId: thread.threadId,
             query: debouncedQuery,
-            ...(index === null ? (start ? { start } : {}) : { index }),
+            ...(start ? { start } : {}),
+            ...(offset !== 0 ? { offset } : {}),
             skills: skillLabels,
           },
         })
       : null;
   const result = useEnvironmentQuery(atom);
-  const { refresh } = result;
-  const messages = content?.visibleTurnItems;
-  const plans = content?.runs;
-  const revision = useMemo(() => ({ messages, plans }), [messages, plans]);
-  const settledRevision = useDebouncedValue(revision, 300);
-  const lastRevision = useRef(settledRevision);
-  useEffect(() => {
-    if (lastRevision.current === settledRevision) return;
-    lastRevision.current = settledRevision;
-    if (atom !== null) refresh();
-  }, [atom, refresh, settledRevision]);
   const key = thread
-    ? JSON.stringify([thread.environmentId, thread.threadId, normalizedQuery, start])
+    ? JSON.stringify([thread.environmentId, thread.threadId, normalizedQuery, skillLabels])
     : null;
   const [previous, setPrevious] = useState({
     key,
