@@ -77,12 +77,15 @@ export function useThreadFind({
       : null;
   const count = remote.data?.totalMatches ?? 0;
   const activeIndex = remote.data?.activeIndex ?? 0;
-  const step = (delta: number) =>
+  const step = (delta: number) => {
+    // Before results arrive, stepping would replace the reading-position start with index 0.
+    if (count === 0) return;
     setState((previous) => ({
       ...previous,
       activeIndex: stepThreadFindIndex(previous.activeIndex ?? activeIndex, count, delta),
       navigationId: previous.navigationId + 1,
     }));
+  };
 
   return {
     isOpen,

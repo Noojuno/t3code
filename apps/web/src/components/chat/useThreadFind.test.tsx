@@ -136,6 +136,29 @@ describe("V2 find state", () => {
     expect(find.timelineProps.findNavigationId).toBe(1);
   });
 
+  it("keeps the reading-position start when Enter is pressed before results arrive", async () => {
+    queries.pending = true;
+    await act(async () => {
+      renderer = create(<Probe environmentId={a} />);
+    });
+    await act(async () => find.open());
+    find.timelineProps.findPositionReaderRef.current = () => ({
+      entryId: "message:6",
+      occurrence: 1,
+    });
+    await act(async () => find.barProps.onQueryChange("COD4"));
+    await act(async () => find.barProps.onNext());
+    expect(orchestrationEnvironment.threadFind).toHaveBeenLastCalledWith({
+      environmentId: a,
+      input: {
+        threadId,
+        query: "COD4",
+        skills: [],
+        start: { entryId: "message:6", occurrence: 1 },
+      },
+    });
+  });
+
   it("shows Searching only when the query has no result yet", async () => {
     queries.pending = true;
     await act(async () => {

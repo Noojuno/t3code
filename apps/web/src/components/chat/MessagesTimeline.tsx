@@ -4598,6 +4598,12 @@ const CollapsibleUserMessageBody = memo(function CollapsibleUserMessageBody(prop
   footer?: ReactNode;
 }) {
   const [expanded, setExpanded] = useState(false);
+  // Closing find keeps bodies it opened, so the reading position and revealed match stay put.
+  const [wasExpandedForFind, setWasExpandedForFind] = useState(props.expandForFind === true);
+  if (wasExpandedForFind !== (props.expandForFind === true)) {
+    setWasExpandedForFind(props.expandForFind === true);
+    if (wasExpandedForFind) setExpanded(true);
+  }
   const hasVisibleBody = props.text.trim().length > 0;
   const canCollapse = hasVisibleBody && shouldCollapseUserMessage(props.text);
   const isCollapsed = canCollapse && !expanded && !props.expandForFind;
