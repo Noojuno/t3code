@@ -66,7 +66,7 @@ export function useThreadFind({
   );
   const status: "loading" | "error" | null = remote.error
     ? "error"
-    : remote.isPending
+    : remote.isPending && remote.data === null
       ? "loading"
       : null;
   const count = remote.data?.totalMatches ?? 0;

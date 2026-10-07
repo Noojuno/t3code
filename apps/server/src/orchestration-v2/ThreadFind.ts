@@ -146,6 +146,18 @@ function resultFor(
 ): OrchestrationV2SearchThreadResult {
   const selected = selectMatch(docs, requestedIndex);
   const index = selected.document === null ? -1 : docs.indexOf(selected.document);
+  return resultForSelection(
+    selected,
+    index < 0 ? [] : rows.slice(Math.max(0, index - 2), index + 3),
+    snapshotSequence,
+  );
+}
+
+function resultForSelection(
+  selected: ReturnType<typeof selectMatch>,
+  items: readonly OrchestrationV2ProjectedTurnItem[],
+  snapshotSequence: number,
+): OrchestrationV2SearchThreadResult {
   return {
     snapshotSequence,
     totalMatches: selected.totalMatches,
@@ -158,7 +170,7 @@ function resultFor(
             runId: selected.document.runId,
             occurrence: selected.occurrence,
           },
-    items: index < 0 ? [] : rows.slice(Math.max(0, index - 2), index + 3),
+    items,
   };
 }
 
@@ -218,8 +230,12 @@ export const makeThreadFind = Effect.fn("makeThreadFind")(function* (
     timeToLive: "1 minute",
     lookup: (key: TextKey) => Effect.sync(() => parseText(key)),
   });
+  // Retain counts and item references, never message bodies. Navigation checks
+  // the current revision in its transaction and loads only five context items.
+  const scans = new Map<string, { sequence: number; documents: readonly FindDocument[] }>();
   const snapshot = Effect.fn("ThreadFind.snapshot")(
-    function* (threadId: ThreadId) {
+    function* (input: OrchestrationV2SearchThreadInput) {
+      const { threadId } = input;
       const active = yield* sql<{ cwd: string | null }>`
       SELECT COALESCE(json_extract(t.payload_json, '$.worktreePath'), p.workspace_root) AS cwd
       FROM orchestration_v2_projection_threads t JOIN projection_projects p ON p.project_id = t.project_id
@@ -235,6 +251,19 @@ export const makeThreadFind = Effect.fn("makeThreadFind")(function* (
       WHERE application_event_version = 2 AND aggregate_kind = 'thread'
         AND stream_id IN (SELECT value FROM json_each(${sources}))
     `;
+      const cwd = active[0].cwd ?? undefined;
+      const sequence = revision[0]?.sequence ?? 0;
+      const cacheKey = JSON.stringify([threadId, cwd, input.query, input.skills ?? []]);
+      const cached = scans.get(cacheKey);
+      if (cached?.sequence === sequence) {
+        const selected = selectMatch(cached.documents, input.index ?? 0);
+        const index = selected.document === null ? -1 : cached.documents.indexOf(selected.document);
+        const context = index < 0 ? [] : cached.documents.slice(Math.max(0, index - 2), index + 3);
+        const items = yield* load(threadId, context);
+        scans.delete(cacheKey);
+        scans.set(cacheKey, cached);
+        return { result: resultForSelection(selected, items, sequence) };
+      }
       const candidates = index
         .map((row, position) => ({ ...row, position }))
         .filter((row) =>
@@ -246,13 +275,15 @@ export const makeThreadFind = Effect.fn("makeThreadFind")(function* (
       for (let start = 0; start < candidates.length; start += 128) {
         items.push(...(yield* load(threadId, candidates.slice(start, start + 128))));
       }
-      return { items, cwd: active[0].cwd ?? undefined, sequence: revision[0]?.sequence ?? 0 };
+      return { items, cwd, sequence, cacheKey };
     },
     sql.withTransaction,
-    (effect, threadId) =>
+    (effect, input) =>
       effect.pipe(
         Effect.mapError((cause) =>
-          isSnapshotError(cause) ? cause : new ProjectionStoreReadError({ threadId, cause }),
+          isSnapshotError(cause)
+            ? cause
+            : new ProjectionStoreReadError({ threadId: input.threadId, cause }),
         ),
       ),
   );
@@ -261,7 +292,9 @@ export const makeThreadFind = Effect.fn("makeThreadFind")(function* (
   ) {
     // Release the SQLite connection before parsing. All rows and their revision
     // come from one snapshot, including inherited fork history.
-    const { items, cwd, sequence } = yield* snapshot(input.threadId);
+    const data = yield* snapshot(input);
+    if (data.result) return data.result;
+    const { items, cwd, sequence, cacheKey } = data;
     const rows = searchableRows(items);
     const skills = input.skills ?? [];
     const documents: FindDocument[] = [];
@@ -271,6 +304,12 @@ export const makeThreadFind = Effect.fn("makeThreadFind")(function* (
         key.text.length <= 32_768 ? yield* Cache.get(textCache, key) : parseText(key);
       documents.push(documentFor(row, countSegments(segments, input.query)));
       yield* Effect.yieldNow;
+    }
+    scans.delete(cacheKey);
+    scans.set(cacheKey, { sequence, documents });
+    if (scans.size > 8) {
+      const oldest = scans.keys().next().value;
+      if (oldest !== undefined) scans.delete(oldest);
     }
     return resultFor(rows, documents, input.index ?? 0, sequence);
   });

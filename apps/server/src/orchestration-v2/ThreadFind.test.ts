@@ -17,6 +17,8 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/sql/SqlClient";
+import { vi } from "vite-plus/test";
+import * as ThreadFindText from "@t3tools/shared/threadFindText";
 
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
@@ -193,6 +195,36 @@ const setup = Effect.gen(function* () {
 });
 
 describe("V2 thread find", () => {
+  it.effect("reuses match counts on navigation even for text larger than the Markdown cache", () =>
+    Effect.gen(function* () {
+      const projection = yield* setup;
+      const text = `${"large message ".repeat(2600)}needle`;
+      yield* putItems(Array.from({ length: 8 }, (_, i) => item(`large:${i}`, i + 1, text)));
+      const parse = vi.spyOn(ThreadFindText, "searchableMessageSegments");
+      try {
+        const first = yield* projection.searchThread({ threadId, query: "needle" });
+        assert.equal(first.totalMatches, 8);
+        assert.equal(parse.mock.calls.length, 8);
+        parse.mockClear();
+        const next = yield* projection.searchThread({ threadId, query: "needle", index: 4 });
+        assert.equal(next.match?.entryId, "large:4");
+        assert.equal(next.snapshotSequence, first.snapshotSequence);
+        assert.deepEqual(
+          next.items.map(({ item }) => item.id),
+          ["large:2", "large:3", "large:4", "large:5", "large:6"],
+        );
+        assert.equal(parse.mock.calls.length, 0);
+        yield* putItems([item("large:4", 5, `${text} needle`)], "changed");
+        const changed = yield* projection.searchThread({ threadId, query: "needle", index: 5 });
+        assert.equal(changed.totalMatches, 9);
+        assert.deepEqual(changed.match, { entryId: "large:4", runId, occurrence: 1 });
+        assert.equal(parse.mock.calls.length, 8);
+      } finally {
+        parse.mockRestore();
+      }
+    }).pipe(Effect.provide(layerTest)),
+  );
+
   it.effect("searches visible rendered messages and plans in canonical item order", () =>
     Effect.gen(function* () {
       const projection = yield* setup;

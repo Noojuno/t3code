@@ -174,11 +174,33 @@ describe("V2 find state", () => {
     await act(async () => find.barProps.onNext());
     expect(find.timelineProps.activeFindMatch?.entryId).toBe("message:2");
     expect(find.timelineProps.findNavigationId).toBe(0);
+    expect(find.barProps.status).toBeNull();
+    expect(find.barProps.activeIndex).toBe(0);
+    expect(find.barProps.matchCount).toBe(10);
     queries.pending = false;
     queries.results.set(a, messageResult(1));
     await act(async () => renderer?.update(<Probe environmentId={a} />));
     expect(find.timelineProps.activeFindMatch?.entryId).toBe("message:3");
     expect(find.timelineProps.findNavigationId).toBe(1);
+  });
+
+  it("shows Searching only when the query has no result yet", async () => {
+    queries.pending = true;
+    await act(async () => {
+      renderer = create(<Probe environmentId={a} />);
+    });
+    await act(async () => find.open());
+    await act(async () => find.barProps.onQueryChange("COD4"));
+    expect(find.barProps.status).toBe("loading");
+    queries.pending = false;
+    queries.results.set(a, messageResult(0));
+    await act(async () => renderer?.update(<Probe environmentId={a} />));
+    expect(find.barProps.status).toBeNull();
+    queries.pending = true;
+    queries.results.delete(a);
+    await act(async () => find.barProps.onQueryChange("different query"));
+    expect(find.barProps.status).toBe("loading");
+    expect(find.barProps.matchCount).toBe(0);
   });
 
   it("keeps search unavailable when the server does not support it", async () => {

@@ -1500,7 +1500,9 @@ const ConversationTimeline = memo(function ConversationTimeline({
               getItemType={getItemType}
               renderItem={renderItem}
               estimatedItemSize={90}
-              initialScrollAtEnd={citationRequest === null && rememberedPosition?.atEnd !== false}
+              initialScrollAtEnd={
+                !findActive && citationRequest === null && rememberedPosition?.atEnd !== false
+              }
               // Legend needs a data refresh to mount new pins without a scroll event.
               dataVersion={readyCitationRequest?.key ?? listIdentityKey}
               {...(alwaysRender ? { alwaysRender } : {})}
