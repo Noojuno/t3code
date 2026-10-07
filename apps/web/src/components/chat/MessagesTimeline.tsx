@@ -209,6 +209,7 @@ import {
   resolveTimelineMinimapTopPercent,
   resolveWorkGroupScrollIndex,
   shouldFollowWorkGroupAppend,
+  timelineEntryTurnFoldRunId,
   toolGroupAction,
   workEntryDisplayLabel,
   workEntryReadOutput,
@@ -816,7 +817,19 @@ const ConversationTimeline = memo(function ConversationTimeline({
     });
   }, [latestRun]);
 
-  const activeFindRunId = activeFindMatch?.runId;
+  // Find the fold that hides the match: imported turns have no run id but still
+  // fold under a synthetic key, so the match's own run id cannot open them.
+  const activeFindEntryId = activeFindMatch?.entryId;
+  const activeFindRunId = useMemo(
+    () =>
+      activeFindEntryId === undefined
+        ? undefined
+        : (timelineEntryTurnFoldRunId(
+            { timelineEntries, latestRun, runningRunId, isWorking, runlessWorkActive },
+            activeFindEntryId,
+          ) ?? undefined),
+    [activeFindEntryId, timelineEntries, latestRun, runningRunId, isWorking, runlessWorkActive],
+  );
   useEffect(() => {
     if (!activeFindRunId) return;
     setExpandedRunIds((previous) =>
