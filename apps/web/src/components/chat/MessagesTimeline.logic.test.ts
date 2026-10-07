@@ -2359,6 +2359,13 @@ describe("deriveMessagesTimelineRows", () => {
     const foldInput = { timelineEntries, latestRun: null, isWorking: false };
     const foldRunId = timelineEntryTurnFoldRunId(foldInput, "imported-update");
     expect(foldRunId).not.toBeNull();
+    // The rendered turn-fold row carries the same key, so find can map it back.
+    const foldRow = deriveMessagesTimelineRows({
+      ...foldInput,
+      turnDiffSummaries: [],
+      supportsConversationRollback: false,
+    }).find((row) => row.kind === "turn-fold");
+    expect(foldRow?.kind === "turn-fold" ? foldRow.runId : null).toBe(foldRunId);
     expect(timelineEntryTurnFoldRunId(foldInput, "imported-answer")).toBeNull();
     const expanded = deriveMessagesTimelineRows({
       ...foldInput,

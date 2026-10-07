@@ -210,6 +210,7 @@ import {
   resolveWorkGroupScrollIndex,
   shouldFollowWorkGroupAppend,
   timelineEntryTurnFoldRunId,
+  timelineTurnFoldRunIdsByEntryId,
   threadReadLabelPrefix,
   threadReadTargetId,
   threadReadTargetTitle,
@@ -1440,8 +1441,16 @@ const ConversationTimeline = memo(function ConversationTimeline({
 
   useLayoutEffect(() => {
     if (!findPositionReaderRef || !timelineViewportElement) return;
-    const read: ThreadFindPositionReader = (query) =>
-      readThreadFindPosition(
+    const read: ThreadFindPositionReader = (query) => {
+      // Imported turns fold under a synthetic key, so match folds by key, not run id.
+      const foldRunIds = timelineTurnFoldRunIdsByEntryId({
+        timelineEntries,
+        latestRun,
+        runningRunId,
+        isWorking,
+        runlessWorkActive,
+      });
+      return readThreadFindPosition(
         timelineViewportElement,
         query,
         (rowId) => {
@@ -1450,11 +1459,13 @@ const ConversationTimeline = memo(function ConversationTimeline({
             const entry = timelineEntries.find((entry) => {
               if (row.kind === "turn-fold" || row.kind === "attempt-fold") {
                 const runId =
-                  entry.kind === "message"
-                    ? entry.message.runId
-                    : entry.kind === "proposed-plan"
-                      ? entry.proposedPlan.runId
-                      : null;
+                  row.kind === "turn-fold"
+                    ? foldRunIds.get(entry.id)
+                    : entry.kind === "message"
+                      ? entry.message.runId
+                      : entry.kind === "proposed-plan"
+                        ? entry.proposedPlan.runId
+                        : null;
                 return (
                   runId === row.runId &&
                   (entry.kind !== "message" || entry.message.role === "assistant") &&
@@ -1470,6 +1481,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
         },
         contentInsetEndAdjustment,
       );
+    };
     findPositionReaderRef.current = read;
     return () => {
       if (findPositionReaderRef.current === read) findPositionReaderRef.current = null;
@@ -1477,7 +1489,11 @@ const ConversationTimeline = memo(function ConversationTimeline({
   }, [
     contentInsetEndAdjustment,
     findPositionReaderRef,
+    isWorking,
+    latestRun,
     rows,
+    runlessWorkActive,
+    runningRunId,
     timelineEntries,
     timelineViewportElement,
   ]);

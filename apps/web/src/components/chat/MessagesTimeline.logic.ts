@@ -2014,10 +2014,21 @@ export function timelineEntryTurnFoldRunId(
   >,
   entryId: string,
 ): RunId | null {
+  return timelineTurnFoldRunIdsByEntryId(input).get(entryId) ?? null;
+}
+
+/** Every folded entry's fold key, computed once for callers that check many entries. */
+export function timelineTurnFoldRunIdsByEntryId(
+  input: Pick<
+    MessagesTimelineRowsInput,
+    "timelineEntries" | "latestRun" | "isWorking" | "runlessWorkActive" | "runningRunId"
+  >,
+): ReadonlyMap<string, RunId> {
+  const byEntryId = new Map<string, RunId>();
   for (const fold of deriveTimelineTurnFolds(input).values()) {
-    if (fold.hiddenEntryIds.has(entryId)) return fold.runId;
+    for (const entryId of fold.hiddenEntryIds) byEntryId.set(entryId, fold.runId);
   }
-  return null;
+  return byEntryId;
 }
 
 function sameCheckpointSummaries(
