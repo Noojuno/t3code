@@ -3491,10 +3491,10 @@ export const OrchestrationV2SearchThreadInput = Schema.Struct({
   skills: Schema.optionalKey(
     Schema.Array(
       Schema.Struct({
-        name: Schema.String,
-        displayName: Schema.optional(Schema.String),
+        name: Schema.String.check(Schema.isMaxLength(200)),
+        displayName: Schema.optional(Schema.String.check(Schema.isMaxLength(200))),
       }),
-    ),
+    ).check(Schema.isMaxLength(1_000)),
   ),
   query: TrimmedNonEmptyString.check(Schema.isMaxLength(200)),
   index: Schema.optionalKey(NonNegativeInt),

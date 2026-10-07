@@ -219,16 +219,12 @@ export const makeThreadFind = Effect.fn("makeThreadFind")(function* (
       if (!items) byThread.set(row.thread_id, (items = new Map()));
       items.set(row.turn_item_id, row.payload_json);
     }
-    return yield* Effect.forEach(rows, (row) =>
-      Effect.gen(function* () {
-        const payload = byThread.get(row.sourceThreadId)?.get(row.sourceItemId);
-        if (payload === undefined) return yield* new ProjectionStoreReadError({ threadId });
-        const item = yield* decodeItem(payload).pipe(
-          Effect.mapError((cause) => new ProjectionStoreReadError({ threadId, cause })),
-        );
-        return { ...row, item };
-      }),
-    );
+    return yield* Effect.forEach(rows, (row) => {
+      const payload = byThread.get(row.sourceThreadId)?.get(row.sourceItemId);
+      return payload === undefined
+        ? Effect.fail(new ProjectionStoreReadError({ threadId }))
+        : Effect.succeed({ ...row, payload });
+    });
   });
   // Cache rendered segments, not queries; typing and navigation reuse Markdown parsing.
   const textCache = yield* Cache.make({
@@ -236,7 +232,13 @@ export const makeThreadFind = Effect.fn("makeThreadFind")(function* (
     timeToLive: "1 minute",
     lookup: (key: TextKey) => Effect.sync(() => parseText(key)),
   });
-  // Retain counts and item references, never message bodies. Navigation checks
+  // Bounded separately because each entry can hold a large body; typing reuses the parse.
+  const largeTextCache = yield* Cache.make({
+    capacity: 32,
+    timeToLive: "1 minute",
+    lookup: (key: TextKey) => Effect.sync(() => parseText(key)),
+  });
+  // Scans retain counts and item references, never message bodies. Navigation checks
   // the current revision in its transaction without reloading message payloads.
   const scans = new Map<string, { sequence: number; documents: readonly FindDocument[] }>();
   const snapshot = Effect.fn("ThreadFind.snapshot")(
@@ -279,11 +281,11 @@ export const makeThreadFind = Effect.fn("makeThreadFind")(function* (
             row.item.type,
           ),
         );
-      const items: OrchestrationV2ProjectedTurnItem[] = [];
+      const payloads: (FindRow & { readonly payload: string })[] = [];
       for (let start = 0; start < candidates.length; start += 128) {
-        items.push(...(yield* load(threadId, candidates.slice(start, start + 128))));
+        payloads.push(...(yield* load(threadId, candidates.slice(start, start + 128))));
       }
-      return { items, cwd, sequence, cacheKey };
+      return { payloads, cwd, sequence, cacheKey };
     },
     sql.withTransaction,
     (effect, input) =>
@@ -302,14 +304,27 @@ export const makeThreadFind = Effect.fn("makeThreadFind")(function* (
     // come from one snapshot, including inherited fork history.
     const data = yield* snapshot(input);
     if (data.result) return data.result;
-    const { items, cwd, sequence, cacheKey } = data;
+    const { payloads, cwd, sequence, cacheKey } = data;
+    // Decode after the snapshot so the write lock is not held for it.
+    const items: OrchestrationV2ProjectedTurnItem[] = yield* Effect.forEach(
+      payloads,
+      ({ payload, ...row }) =>
+        decodeItem(payload).pipe(
+          Effect.map((item) => ({ ...row, item })),
+          Effect.mapError(
+            (cause) => new ProjectionStoreReadError({ threadId: input.threadId, cause }),
+          ),
+        ),
+    );
     const rows = searchableRows(items);
     const skills = input.skills ?? [];
     const documents: FindDocument[] = [];
     for (const row of rows) {
       const key = textKey(row.item, cwd, skills);
-      const segments =
-        key.text.length <= 32_768 ? yield* Cache.get(textCache, key) : parseText(key);
+      const segments = yield* Cache.get(
+        key.text.length <= 32_768 ? textCache : largeTextCache,
+        key,
+      );
       documents.push(documentFor(row, countSegments(segments, input.query)));
       yield* Effect.yieldNow;
     }
