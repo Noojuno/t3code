@@ -691,6 +691,10 @@ function MarkdownDetails({
   const [isOpen, setIsOpen] = useState(open);
   const searching = use(MarkdownFindContext);
   const expanded = isOpen;
+  const revealForFind = useCallback(() => setIsOpen(true), []);
+  // Base UI only listens for `beforematch` on a panel mounted at its first
+  // render; a closed panel mounts later, when find starts, so listen here.
+  const findRevealRef = useFindRevealRef(revealForFind);
   const childNodes = Children.toArray(children);
   const summaryIndex = childNodes.findIndex(
     (child) => isValidElement(child) && child.type === "summary",
@@ -720,8 +724,7 @@ function MarkdownDetails({
           />
           <span>{summary}</span>
         </CollapsibleTrigger>
-        {/* Base UI opens an until-found panel on `beforematch`. */}
-        <CollapsiblePanel hiddenUntilFound={searching}>
+        <CollapsiblePanel ref={findRevealRef} hiddenUntilFound={searching}>
           <div
             className="pb-3 ps-6 text-foreground/[calc(80%+var(--appearance-contrast-boost)/5)]"
             data-markdown-details-content=""

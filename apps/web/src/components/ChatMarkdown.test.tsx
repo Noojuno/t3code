@@ -1064,10 +1064,16 @@ it("opens a disclosure only when find selects a match inside it", async () => {
     [...container.querySelectorAll("[data-markdown-details-open]")].map((node) =>
       node.getAttribute("data-markdown-details-open"),
     );
-  function Probe({ activeOccurrence }: { activeOccurrence: number }) {
+  function Probe({
+    activeOccurrence,
+    searching = true,
+  }: {
+    activeOccurrence: number;
+    searching?: boolean;
+  }) {
     useThreadFindHighlights({
       container,
-      query: "needle",
+      query: searching ? "needle" : "",
       activeRowId: "row",
       activeOccurrence,
       onActiveRange: () => {},
@@ -1075,7 +1081,7 @@ it("opens a disclosure only when find selects a match inside it", async () => {
     return (
       <div data-timeline-row-id="row">
         <div data-thread-find-text>
-          <MarkdownFindContext value={true}>
+          <MarkdownFindContext value={searching}>
             <ChatMarkdown
               cwd={undefined}
               text={[
@@ -1092,6 +1098,9 @@ it("opens a disclosure only when find selects a match inside it", async () => {
   const frame = () =>
     act(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
   try {
+    // Closed panels are unmounted until find starts, as in the app.
+    await act(() => root.render(<Probe activeOccurrence={0} searching={false} />));
+    expect(container.textContent).not.toContain("nothing here");
     await act(() => root.render(<Probe activeOccurrence={0} />));
     await frame();
     // Selecting the visible match opens nothing; the folded one is counted but not painted.
