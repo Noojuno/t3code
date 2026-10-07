@@ -1,5 +1,5 @@
 import { useThreadFind } from "./chat/useThreadFind";
-import { ThreadFindBar } from "./chat/ThreadFindBar";
+import { THREAD_FIND_BAR_RESERVED_HEIGHT, ThreadFindBar } from "./chat/ThreadFindBar";
 import { ChatCanvas } from "./chat/ChatCanvas";
 import { usageLimitRecoveryBannerItem } from "./chat/UsageLimitRecoveryBanner";
 import {
@@ -7940,6 +7940,11 @@ export default function ChatView(props: ChatViewProps) {
     content: serverProjection ?? undefined,
   });
   const { isOpen: isThreadFindActive, open: openThreadFind, close: closeThreadFind } = threadFind;
+  // The details popover hangs off the header over the find bar; opening find dismisses it.
+  useEffect(() => {
+    if (!isThreadFindActive || threadPanelPresentation !== "popover" || !activeThreadRef) return;
+    useRightPanelStore.getState().setThreadPanelOpen(activeThreadRef, "popover", false);
+  }, [activeThreadRef, isThreadFindActive, threadPanelPresentation]);
 
   useEffect(() => {
     const handler = (event: globalThis.KeyboardEvent) => {
@@ -11285,19 +11290,13 @@ export default function ChatView(props: ChatViewProps) {
               ? { onOpenProjectSettings: handleOpenDraftProjectSettings }
               : {})}
           />
-          <ThreadFindBar
-            {...threadFind.barProps}
-            onClose={() => {
-              closeThreadFind();
-              focusComposer();
-            }}
-          />
         </header>
 
         {/* Main content area with optional plan sidebar */}
         <div className="relative flex min-h-0 min-w-0 flex-1">
           {/* Chat column */}
           <ChatCanvas
+            detailsCardTopInset={isThreadFindActive ? THREAD_FIND_BAR_RESERVED_HEIGHT : 0}
             composerOverlayElement={isDraftHeroState ? null : composerOverlayElement}
             data-chat-workspace-drop-target="true"
             onDragEnter={workspaceFileDropHandlers.onDragEnter}
@@ -11305,6 +11304,13 @@ export default function ChatView(props: ChatViewProps) {
             onDragLeave={workspaceFileDropHandlers.onDragLeave}
             onDrop={workspaceFileDropHandlers.onDrop}
           >
+            <ThreadFindBar
+              {...threadFind.barProps}
+              onClose={() => {
+                closeThreadFind();
+                focusComposer();
+              }}
+            />
             {isWorkspaceFileDragActive ? (
               <div
                 className="pointer-events-none absolute inset-2 z-40 flex items-center justify-center rounded-2xl border-2 border-dashed border-primary/60 bg-primary/[0.035]"

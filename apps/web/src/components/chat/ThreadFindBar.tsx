@@ -4,6 +4,7 @@ import { Button } from "../ui/button";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "../ui/input-group";
 import { cn } from "~/lib/utils";
 import { formatThreadFindCount } from "./threadFind";
+import { THREAD_DETAILS_CARD_GAP } from "./threadDetailsCardLayout";
 
 interface ThreadFindBarProps {
   readonly open: boolean;
@@ -18,6 +19,12 @@ interface ThreadFindBarProps {
   readonly onPrevious: () => void;
   readonly onClose: () => void;
 }
+
+/**
+ * Room the open bar takes at the top of the chat canvas: its `h-9` height plus
+ * the shared 12px gap below it, so the details card starts on the same rhythm.
+ */
+export const THREAD_FIND_BAR_RESERVED_HEIGHT = 36 + THREAD_DETAILS_CARD_GAP;
 
 export function ThreadFindBar(props: ThreadFindBarProps) {
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -57,7 +64,7 @@ export function ThreadFindBar(props: ThreadFindBarProps) {
       role="search"
       aria-label="Find in thread"
       aria-busy={props.status === "loading"}
-      className="absolute top-[calc(100%+0.5rem)] right-0 z-40 w-[min(24rem,calc(100vw-1.5rem))] [-webkit-app-region:no-drag]"
+      className="absolute top-3 right-3 z-40 w-[min(24rem,calc(100%-1.5rem))]"
     >
       <InputGroupInput
         ref={inputRef}
@@ -72,7 +79,7 @@ export function ThreadFindBar(props: ThreadFindBarProps) {
         onChange={(event) => props.onQueryChange(event.target.value)}
         onKeyDown={handleKeyDown}
       />
-      <InputGroupAddon align="inline-end">
+      <InputGroupAddon align="inline-end" inset="pill">
         <span
           aria-live="polite"
           className={cn(
