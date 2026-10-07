@@ -450,6 +450,10 @@
     "./inlineSkills": {
       "types": "./src/inlineSkills.ts",
       "import": "./src/inlineSkills.ts"
+    },
+    "./mcpApp": {
+      "types": "./src/mcpApp.ts",
+      "import": "./src/mcpApp.ts"
     }
   },
   "scripts": {
