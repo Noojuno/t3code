@@ -3,6 +3,7 @@ import { create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import {
   EnvironmentId,
+  MessageId,
   PlanId,
   RunId,
   ThreadId,
@@ -17,6 +18,7 @@ import { requestThreadFindOpen } from "./threadFindActionBus";
 
 const queries = vi.hoisted(() => ({
   results: new Map<string, OrchestrationV2SearchThreadResult>(),
+  pending: false,
 }));
 vi.mock("~/state/orchestration", () => ({
   orchestrationEnvironment: {
@@ -29,7 +31,7 @@ vi.mock("~/state/queries", () => ({ useDebouncedValue: <T,>(value: T) => value }
 vi.mock("~/state/query", () => ({
   useEnvironmentQuery: (atom: { environmentId: EnvironmentId } | null) => ({
     data: atom === null ? null : (queries.results.get(atom.environmentId) ?? null),
-    isPending: false,
+    isPending: queries.pending,
     error: null,
     refresh: () => {},
   }),
@@ -69,11 +71,116 @@ afterEach(async () => {
   if (renderer) await act(async () => renderer?.unmount());
   renderer = undefined;
   queries.results.clear();
+  queries.pending = false;
   vi.clearAllMocks();
   vi.unstubAllGlobals();
 });
 
 describe("V2 find state", () => {
+  function messageResult(index: number, snapshotSequence = 9): OrchestrationV2SearchThreadResult {
+    return {
+      snapshotSequence,
+      totalMatches: 10,
+      activeIndex: index,
+      match: { entryId: `message:${index + 2}`, runId, occurrence: 0 },
+      items: Array.from({ length: 5 }, (_, offset) => {
+        const position = index + offset;
+        return {
+          position,
+          sourceThreadId: threadId,
+          sourceItemId: TurnItemId.make(`item:${position}`),
+          visibility: "local",
+          item: {
+            id: TurnItemId.make(`item:${position}`),
+            messageId: MessageId.make(`message:${position}`),
+            threadId,
+            runId,
+            nodeId: null,
+            providerThreadId: null,
+            providerTurnId: null,
+            nativeItemRef: null,
+            parentItemId: null,
+            ordinal: position,
+            status: "completed",
+            title: null,
+            startedAt: now,
+            completedAt: now,
+            updatedAt: now,
+            type: "assistant_message",
+            text: `COD4 progress ${position}`,
+            streaming: false,
+          },
+        };
+      }),
+    };
+  }
+
+  it("keeps nearby messages stable until the next match leaves the current window", async () => {
+    queries.results.set(a, messageResult(0));
+    await act(async () => {
+      renderer = create(<Probe environmentId={a} />);
+    });
+    await act(async () => find.open());
+    await act(async () => find.barProps.onQueryChange("COD4"));
+    const originalEntries = find.timelineProps.searchEntries;
+    for (const index of [1, 2]) {
+      queries.results.set(a, messageResult(index));
+      await act(async () => find.barProps.onNext());
+      expect(find.timelineProps.searchEntries).toBe(originalEntries);
+      expect(find.timelineProps.activeFindMatch?.entryId).toBe(`message:${index + 2}`);
+      expect(find.barProps.activeIndex).toBe(index);
+    }
+    queries.results.set(a, messageResult(3));
+    await act(async () => find.barProps.onNext());
+    expect(find.timelineProps.searchEntries?.map((entry) => entry.id)).toEqual([
+      "message:3",
+      "message:4",
+      "message:5",
+      "message:6",
+      "message:7",
+    ]);
+    const nextEntries = find.timelineProps.searchEntries;
+    queries.results.set(a, messageResult(2));
+    await act(async () => find.barProps.onPrevious());
+    expect(find.timelineProps.searchEntries).toBe(nextEntries);
+  });
+
+  it("refreshes context when the snapshot or query changes", async () => {
+    queries.results.set(a, messageResult(0));
+    await act(async () => {
+      renderer = create(<Probe environmentId={a} />);
+    });
+    await act(async () => find.open());
+    await act(async () => find.barProps.onQueryChange("COD4"));
+    const originalEntries = find.timelineProps.searchEntries;
+    queries.results.set(a, messageResult(1, 10));
+    await act(async () => find.barProps.onNext());
+    expect(find.timelineProps.searchEntries).not.toBe(originalEntries);
+    expect(find.timelineProps.searchEntries?.[0]?.id).toBe("message:1");
+    queries.results.set(a, messageResult(0, 10));
+    await act(async () => find.barProps.onQueryChange("progress"));
+    expect(find.timelineProps.searchEntries?.[0]?.id).toBe("message:0");
+  });
+
+  it("does not navigate the previous result while a new match is loading", async () => {
+    queries.results.set(a, messageResult(0));
+    await act(async () => {
+      renderer = create(<Probe environmentId={a} />);
+    });
+    await act(async () => find.open());
+    await act(async () => find.barProps.onQueryChange("COD4"));
+    queries.pending = true;
+    queries.results.delete(a);
+    await act(async () => find.barProps.onNext());
+    expect(find.timelineProps.activeFindMatch?.entryId).toBe("message:2");
+    expect(find.timelineProps.findNavigationId).toBe(0);
+    queries.pending = false;
+    queries.results.set(a, messageResult(1));
+    await act(async () => renderer?.update(<Probe environmentId={a} />));
+    expect(find.timelineProps.activeFindMatch?.entryId).toBe("message:3");
+    expect(find.timelineProps.findNavigationId).toBe(1);
+  });
+
   it("keeps search unavailable when the server does not support it", async () => {
     await act(async () => {
       renderer = create(<Probe environmentId={a} enabled={false} />);

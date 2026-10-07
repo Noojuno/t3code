@@ -220,7 +220,7 @@ import {
   type WorkGroupScrollAnchor,
 } from "./MessagesTimeline.logic";
 import { type ThreadFindMatch } from "./threadFind";
-import { useThreadFindHighlights } from "./threadFindHighlights";
+import { useThreadFindNavigation } from "./useThreadFindNavigation";
 import { TerminalContextInlineChip } from "./TerminalContextInlineChip";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Spinner } from "../ui/spinner";
@@ -415,7 +415,6 @@ const TIMELINE_MAINTAIN_SCROLL_AT_END_SMOOTH = {
   ...TIMELINE_MAINTAIN_SCROLL_AT_END,
   animated: true,
 } as const satisfies MaintainScrollAtEndOptions;
-const FIND_MATCH_VIEW_MARGIN = 96;
 
 // ---------------------------------------------------------------------------
 // Props (public API)
@@ -1431,91 +1430,15 @@ const ConversationTimeline = memo(function ConversationTimeline({
     [listRef, registerTimeline],
   );
 
-  const activeFindMatchKey = activeFindMatch
-    ? `${findNavigationId}:${normalizedFindQuery}:${activeFindMatch.entryId}:${activeFindMatch.occurrence}`
-    : null;
-  const revealedFindMatchKeyRef = useRef<string | null>(null);
-  const [positionedFindMatchKey, setPositionedFindMatchKey] = useState<string | null>(null);
-  const revealActiveFindRange = useCallback(
-    (range: Range | null) => {
-      if (
-        !range ||
-        !activeFindMatchKey ||
-        positionedFindMatchKey !== activeFindMatchKey ||
-        revealedFindMatchKeyRef.current === activeFindMatchKey
-      )
-        return;
-
-      const codeScroller = range.startContainer.parentElement?.closest("pre");
-      if (codeScroller) {
-        const match = range.getBoundingClientRect();
-        const viewport = codeScroller.getBoundingClientRect();
-        if (match.left < viewport.left) codeScroller.scrollLeft += match.left - viewport.left - 16;
-        else if (match.right > viewport.right)
-          codeScroller.scrollLeft += match.right - viewport.right + 16;
-      }
-      const matchRect = range.getBoundingClientRect();
-      const viewportRect = timelineViewportElement?.getBoundingClientRect();
-      if (!viewportRect || matchRect.height === 0) return;
-
-      revealedFindMatchKeyRef.current = activeFindMatchKey;
-      const topBoundary = viewportRect.top + FIND_MATCH_VIEW_MARGIN;
-      const bottomBoundary =
-        viewportRect.bottom - FIND_MATCH_VIEW_MARGIN - contentInsetEndAdjustment;
-      let delta = 0;
-      if (matchRect.top < topBoundary) delta = matchRect.top - topBoundary;
-      else if (matchRect.bottom > bottomBoundary) delta = matchRect.bottom - bottomBoundary;
-      if (Math.abs(delta) < 1) return;
-
-      const currentScroll = listRef.current?.getState?.().scroll;
-      if (typeof currentScroll === "number") {
-        listRef.current?.scrollToOffset({ offset: currentScroll + delta, animated: false });
-      }
-    },
-    [
-      activeFindMatchKey,
-      positionedFindMatchKey,
-      contentInsetEndAdjustment,
-      listRef,
-      timelineViewportElement,
-    ],
-  );
-
-  const navigatedFindMatchKeyRef = useRef<string | null>(null);
-
-  const activeFindRowIndex = activeFindMatch
-    ? rows.findIndex((row) => row.id === activeFindMatch.entryId)
-    : -1;
-  useEffect(() => {
-    if (!activeFindMatchKey) {
-      navigatedFindMatchKeyRef.current = null;
-      revealedFindMatchKeyRef.current = null;
-      return;
-    }
-    if (activeFindRowIndex < 0 || navigatedFindMatchKeyRef.current === activeFindMatchKey) return;
-    let cancelled = false;
-    void listRef.current
-      ?.scrollToIndex({
-        index: activeFindRowIndex,
-        animated: false,
-        viewOffset: FIND_MATCH_VIEW_MARGIN,
-      })
-      .then(() => {
-        if (cancelled) return;
-        navigatedFindMatchKeyRef.current = activeFindMatchKey;
-        setPositionedFindMatchKey(activeFindMatchKey);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [activeFindMatchKey, activeFindRowIndex, listRef]);
-
-  useThreadFindHighlights({
+  useThreadFindNavigation({
+    entries: timelineEntries,
     container: timelineViewportElement,
     query: normalizedFindQuery,
-    activeRowId: activeFindMatch?.entryId ?? null,
-    activeOccurrence: activeFindMatch?.occurrence ?? 0,
-    onActiveRange: revealActiveFindRange,
+    match: activeFindMatch,
+    navigationId: findNavigationId,
+    rowIndex: activeFindMatch ? rows.findIndex((row) => row.id === activeFindMatch.entryId) : -1,
+    listRef,
+    contentInsetEndAdjustment,
   });
 
   // Stable renderItem — no closure deps. Row components read shared state

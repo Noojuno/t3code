@@ -60,6 +60,7 @@ export function useThreadFind({
     isOpen ? thread : null,
     state.query,
     state.activeIndex,
+    state.navigationId,
     content,
     skills,
   );
@@ -70,15 +71,16 @@ export function useThreadFind({
       : null;
   const count = remote.data?.totalMatches ?? 0;
   const activeIndex = remote.data?.activeIndex ?? 0;
+  const searchItems = remote.data?.match ? remote.data.items : null;
   const searchEntries = useMemo(
     () =>
-      remote.data?.match
+      searchItems
         ? deriveTimelineEntriesFromVisibleTurnItems({
-            visibleTurnItems: remote.data.items,
+            visibleTurnItems: searchItems,
             optimisticMessages: [],
           })
         : null,
-    [remote.data],
+    [searchItems],
   );
   const step = (delta: number) =>
     setState((previous) => ({
@@ -111,7 +113,7 @@ export function useThreadFind({
       onCloseSearch: close,
       findQuery: isOpen && searchEntries !== null ? state.query : "",
       activeFindMatch: remote.data?.match ?? null,
-      findNavigationId: state.navigationId,
+      findNavigationId: remote.navigationId,
     },
   };
 }
@@ -121,6 +123,7 @@ function useServerResults(
   thread: ScopedThreadRef | null,
   query: string,
   index: number,
+  navigationId: number,
   content: Pick<OrchestrationV2ThreadProjection, "visibleTurnItems" | "runs"> | undefined,
   skills: readonly InlineSkill[],
 ) {
@@ -152,16 +155,41 @@ function useServerResults(
   const key = thread
     ? JSON.stringify([thread.environmentId, thread.threadId, normalizedQuery])
     : null;
-  const [previous, setPrevious] = useState({ key, data: result.data });
+  const [previous, setPrevious] = useState({
+    key,
+    response: result.data,
+    data: result.data,
+    navigationId,
+  });
   if (
     previous.key !== key ||
-    (result.data !== null && !result.isPending && previous.data !== result.data)
+    (result.data !== null &&
+      !result.isPending &&
+      (previous.response !== result.data || previous.navigationId !== navigationId))
   ) {
-    setPrevious({ key, data: result.data });
+    const response = result.data;
+    const keepContext =
+      previous.key === key &&
+      response?.match !== null &&
+      response?.snapshotSequence === previous.data?.snapshotSequence &&
+      previous.data?.items.some(
+        ({ item }) =>
+          (item.type === "user_message" || item.type === "assistant_message"
+            ? item.messageId
+            : item.id) === response?.match?.entryId,
+      );
+    const retainedItems = keepContext ? previous.data?.items : undefined;
+    setPrevious({
+      key,
+      response,
+      data: response && retainedItems ? { ...response, items: retainedItems } : response,
+      navigationId,
+    });
   }
   return {
     ...result,
-    data: key === previous.key && !result.error ? (result.data ?? previous.data) : null,
+    data: key === previous.key && !result.error ? previous.data : null,
+    navigationId: previous.navigationId,
     isPending:
       thread !== null &&
       normalizedQuery.length > 0 &&
