@@ -1,7 +1,7 @@
 import {
   OrchestrationV2TurnItemJson,
   type OrchestrationV2ProjectedTurnItem,
-  type OrchestrationV2SearchThreadInput,
+  OrchestrationV2SearchThreadInput,
   type OrchestrationV2SearchThreadResult,
   type OrchestrationV2TurnItem,
   ThreadId,
@@ -184,6 +184,16 @@ export const makeThreadFind = Effect.fn("makeThreadFind")(function* (
   >,
 ) {
   const sql = yield* SqlClient.SqlClient;
+  const encodeCacheKey = Schema.encodeEffect(
+    Schema.fromJsonString(
+      Schema.Struct({
+        threadId: ThreadId,
+        cwd: Schema.optional(Schema.String),
+        query: Schema.String,
+        skills: OrchestrationV2SearchThreadInput.fields.skills,
+      }),
+    ),
+  );
   const encodeThreadIds = Schema.encodeEffect(Schema.fromJsonString(Schema.Array(ThreadId)));
   const encodeSources = Schema.encodeEffect(
     Schema.fromJsonString(Schema.Array(Schema.Struct({ threadId: ThreadId, id: TurnItemId }))),
@@ -253,7 +263,12 @@ export const makeThreadFind = Effect.fn("makeThreadFind")(function* (
     `;
       const cwd = active[0].cwd ?? undefined;
       const sequence = revision[0]?.sequence ?? 0;
-      const cacheKey = JSON.stringify([threadId, cwd, input.query, input.skills ?? []]);
+      const cacheKey = yield* encodeCacheKey({
+        threadId,
+        cwd,
+        query: input.query,
+        skills: input.skills ?? [],
+      });
       const cached = scans.get(cacheKey);
       if (cached?.sequence === sequence) {
         const selected = selectMatch(cached.documents, input.index ?? 0);

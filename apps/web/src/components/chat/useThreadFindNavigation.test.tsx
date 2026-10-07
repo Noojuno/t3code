@@ -58,6 +58,7 @@ beforeEach(() => {
       } as unknown as LegendListRef,
     },
     contentInsetEndAdjustment: 100,
+    listReady: true,
   };
 });
 
@@ -71,6 +72,18 @@ afterEach(async () => {
 });
 
 describe("find result navigation", () => {
+  it("waits for list bootstrap before positioning the first result", async () => {
+    rect = new DOMRect(0, 1800, 40, 20);
+    await act(async () => root.render(<Probe {...props} listReady={false} />));
+    expect(scrollToIndex).not.toHaveBeenCalled();
+    expect(scrollToOffset).not.toHaveBeenCalled();
+    scrollToIndex.mockImplementationOnce(async () => {
+      rect = new DOMRect(0, 200, 40, 20);
+    });
+    await act(async () => root.render(<Probe {...props} />));
+    expect(scrollToIndex).toHaveBeenCalledTimes(1);
+    expect(scrollToOffset).not.toHaveBeenCalled();
+  });
   it("leaves the scroll position unchanged between already visible occurrences", async () => {
     await act(async () => root.render(<Probe {...props} />));
     await act(async () =>

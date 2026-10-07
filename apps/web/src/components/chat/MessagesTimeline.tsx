@@ -1080,6 +1080,11 @@ const ConversationTimeline = memo(function ConversationTimeline({
     onExpandTurn: expandCitedRun,
     onManualNavigation,
   });
+  const [findListReady, setFindListReady] = useState(false);
+  const handleListLoad = useCallback(() => {
+    onCitationListLoad();
+    setFindListReady(true);
+  }, [onCitationListLoad]);
   const [minimapHasPersistentGutter, setMinimapHasPersistentGutter] = useState(false);
   const alwaysRender = citationAlwaysRender ?? restoringAlwaysRender;
   const [minimapHitStripWidth, setMinimapHitStripWidth] = useState(0);
@@ -1431,6 +1436,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   );
 
   useThreadFindNavigation({
+    listReady: findListReady,
     entries: timelineEntries,
     container: timelineViewportElement,
     query: normalizedFindQuery,
@@ -1506,7 +1512,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
               // Legend needs a data refresh to mount new pins without a scroll event.
               dataVersion={readyCitationRequest?.key ?? listIdentityKey}
               {...(alwaysRender ? { alwaysRender } : {})}
-              onLoad={onCitationListLoad}
+              onLoad={handleListLoad}
               {...(anchoredEndSpace ? { anchoredEndSpace } : {})}
               contentInsetEndAdjustment={anchoredEndSpace ? contentInsetEndAdjustment : 0}
               maintainScrollAtEnd={

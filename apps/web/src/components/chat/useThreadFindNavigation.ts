@@ -15,6 +15,7 @@ export function useThreadFindNavigation({
   entries,
   listRef,
   contentInsetEndAdjustment,
+  listReady,
 }: {
   container: HTMLElement | null;
   query: string;
@@ -24,6 +25,7 @@ export function useThreadFindNavigation({
   entries: readonly { readonly id: string }[];
   listRef: RefObject<LegendListRef | null>;
   contentInsetEndAdjustment: number;
+  listReady: boolean;
 }) {
   const matchKey = match ? `${navigationId}:${query}:${match.entryId}:${match.occurrence}` : null;
   const positionedMatchRef = useRef<string | null>(null);
@@ -38,6 +40,7 @@ export function useThreadFindNavigation({
         return;
       }
       if (revealedMatchRef.current === matchKey) return;
+      if (!listReady) return;
       const materialize = () => {
         const list = listRef.current;
         if (rowIndex < 0 || !list || positionedMatchRef.current === matchKey) return;
@@ -96,6 +99,7 @@ export function useThreadFindNavigation({
       contentInsetEndAdjustment,
       entries,
       listRef,
+      listReady,
       matchKey,
       positionedMatchKey,
       rowIndex,
