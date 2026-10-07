@@ -106,6 +106,8 @@ export function useThreadFind({
     },
     timelineProps: {
       findOpen: isOpen,
+      // Stays on between keystrokes so folded content does not collapse while results load.
+      findExpanded: isOpen && state.query.trim().length > 0,
       findPositionReaderRef,
       findQuery: isOpen && remote.data?.match ? state.query : "",
       activeFindMatch: remote.data?.match ?? null,

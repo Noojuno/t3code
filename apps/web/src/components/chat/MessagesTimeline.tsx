@@ -530,6 +530,7 @@ interface MessagesTimelineProps {
   /** Non-null when older turns exist beyond the loaded window. */
   loadEarlier?: CitationHistoryPage | null;
   findPositionReaderRef?: React.RefObject<ThreadFindPositionReader | null>;
+  findExpanded?: boolean;
   findQuery?: string;
   activeFindMatch?: ThreadFindMatch | null;
   findNavigationId?: number;
@@ -572,6 +573,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   awaitingUser = false,
   listRef,
   timelineEntries,
+  findExpanded = false,
   findQuery = "",
   activeFindMatch = null,
   findNavigationId = 0,
@@ -679,7 +681,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   const disclosureSettleFrameRef = useRef<number | null>(null);
   const disclosureSettleSecondFrameRef = useRef<number | null>(null);
   const normalizedFindQuery = findQuery.trim();
-  const findActive = normalizedFindQuery.length > 0;
+  const findActive = findExpanded;
 
   useEffect(() => {
     return () => {

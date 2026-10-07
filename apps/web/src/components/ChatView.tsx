@@ -8040,7 +8040,8 @@ export default function ChatView(props: ChatViewProps) {
         return;
       }
 
-      if (command === "chat.find") {
+      // Drafts have nothing to search; leave Mod+F to the browser.
+      if (command === "chat.find" && isServerThread) {
         event.preventDefault();
         event.stopPropagation();
         openThreadFind();

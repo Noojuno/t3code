@@ -103,8 +103,13 @@ export function useThreadFindNavigation({
       const rect = range.getBoundingClientRect();
       const viewport = container?.getBoundingClientRect();
       if (!viewport || rect.height === 0) return;
-      const top = viewport.top + FIND_MATCH_VIEW_MARGIN;
-      const bottom = viewport.bottom - FIND_MATCH_VIEW_MARGIN - contentInsetEndAdjustment;
+      // Shrink the margin when the band above the composer is short, so the match stays inside it.
+      const margin = Math.min(
+        FIND_MATCH_VIEW_MARGIN,
+        Math.max(0, (viewport.height - contentInsetEndAdjustment - rect.height) / 2),
+      );
+      const top = viewport.top + margin;
+      const bottom = viewport.bottom - margin - contentInsetEndAdjustment;
       const delta =
         rect.top < top ? rect.top - top : rect.bottom > bottom ? rect.bottom - bottom : 0;
       // A new list can expose DOM text before its virtual row sizes settle.
