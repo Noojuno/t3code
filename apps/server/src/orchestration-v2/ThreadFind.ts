@@ -63,7 +63,7 @@ function textKey(
 
 function parseText(key: TextKey): readonly string[] {
   return key.role === "plan"
-    ? searchablePlanSegments(key.text, key.cwd, key.skills)
+    ? searchablePlanSegments(key.text, key.cwd)
     : (searchableMessageSegments(
         {
           role: key.role,

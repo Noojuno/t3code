@@ -17,7 +17,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type ReactNode,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
 } from "react";
@@ -255,7 +254,7 @@ export const ChatHeader = memo(function ChatHeader({
   return (
     <div
       className={cn(
-        "relative flex min-w-0 flex-1 items-center gap-2 sm:gap-3",
+        "flex min-w-0 flex-1 items-center gap-2 sm:gap-3",
         rightPanelOpen ? "pr-10" : "pr-24",
       )}
       onContextMenu={handleHeaderContextMenu}

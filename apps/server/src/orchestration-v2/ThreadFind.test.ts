@@ -298,7 +298,18 @@ describe("V2 thread find", () => {
       };
       assert.equal((yield* projection.searchThread(input)).totalMatches, 1);
       assert.equal((yield* projection.searchThread({ ...input, skills: [] })).totalMatches, 0);
-      assert.equal((yield* projection.searchThread({ ...input, query: "App" })).totalMatches, 1);
+      // Plans render `$skill` tokens literally, so they match as written, not by label.
+      yield* putItems(
+        [item("skill-plan", 2, "# Verify\nUse $test-t3-app now", "proposed_plan")],
+        "plan",
+      );
+      assert.equal((yield* projection.searchThread(input)).totalMatches, 1);
+      assert.equal(
+        (yield* projection.searchThread({ ...input, query: "$test-t3-app" })).totalMatches,
+        1,
+      );
+      // The message label "T3 App Testing" plus the plan's literal "$test-t3-app".
+      assert.equal((yield* projection.searchThread({ ...input, query: "App" })).totalMatches, 2);
     }).pipe(Effect.provide(layerTest)),
   );
 

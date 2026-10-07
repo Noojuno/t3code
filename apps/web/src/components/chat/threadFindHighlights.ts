@@ -29,9 +29,15 @@ export function collectThreadFindRanges(container: HTMLElement, query: string): 
     let text = "";
     let nodes: { node: Node; start: number; end: number }[] = [];
     const flush = () => {
+      // Offsets ascend, so both node cursors only move forward: linear in text nodes.
+      let startIndex = 0;
+      let endIndex = 0;
       for (const offset of findThreadSearchOccurrences(text, query)) {
-        const start = nodes.find((part) => part.end > offset);
-        const end = nodes.find((part) => part.end >= offset + query.length);
+        while (startIndex < nodes.length && nodes[startIndex]!.end <= offset) startIndex++;
+        if (endIndex < startIndex) endIndex = startIndex;
+        while (endIndex < nodes.length && nodes[endIndex]!.end < offset + query.length) endIndex++;
+        const start = nodes[startIndex];
+        const end = nodes[endIndex];
         if (!start || !end) continue;
         const range = container.ownerDocument.createRange();
         range.setStart(start.node, offset - start.start);
@@ -56,7 +62,7 @@ export function collectThreadFindRanges(container: HTMLElement, query: string): 
       if (node.nodeType === 3) {
         const value = node.nodeValue ?? "";
         const start = text.length;
-        text += inPre ? value : value.replace(/\n/g, " ");
+        text += inPre ? value : value.replace(/\r?\n/g, " ");
         nodes.push({ node, start, end: text.length });
       }
       for (const child of node.childNodes) visit(child, inPre || tag === "pre");
@@ -94,6 +100,19 @@ function revealFolded(range: Range, container: HTMLElement): boolean {
   const folds = foldsHiding(range, container);
   for (const fold of folds) fold.dispatchEvent(new Event("beforematch"));
   return folds.length > 0;
+}
+
+function affectsSearchableText(record: MutationRecord): boolean {
+  if (record.type === "attributes") return true;
+  const target =
+    record.target.nodeType === 1 ? (record.target as Element) : record.target.parentElement;
+  if (target?.closest(THREAD_FIND_TEXT_SELECTOR)) return true;
+  // Rows mounting or unmounting add or remove whole searchable scopes.
+  const touchesScope = (node: Node) =>
+    node.nodeType === 1 &&
+    ((node as Element).matches(THREAD_FIND_TEXT_SELECTOR) ||
+      (node as Element).querySelector(THREAD_FIND_TEXT_SELECTOR) !== null);
+  return [...record.addedNodes, ...record.removedNodes].some(touchesScope);
 }
 
 export function useThreadFindHighlights(input: {
@@ -151,7 +170,9 @@ export function useThreadFindHighlights(input: {
     repaint();
 
     let frame: number | null = null;
-    const observer = new MutationObserver(() => {
+    const observer = new MutationObserver((records) => {
+      // Timers and status chrome tick every second; only searchable text and folds matter.
+      if (!records.some(affectsSearchableText)) return;
       if (frame !== null) return;
       frame = requestAnimationFrame(() => {
         frame = null;

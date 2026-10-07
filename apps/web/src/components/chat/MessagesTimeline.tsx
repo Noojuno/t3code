@@ -527,7 +527,6 @@ interface MessagesTimelineProps {
   onContentOverflowChange?: (overflows: boolean) => void;
   onToolOutputCollapsedAtEnd?: () => void;
   onManualNavigation: () => void;
-  onResumeLiveFollow?: () => void;
   findOpen?: boolean;
   cancelPositionRestoreRef?: React.RefObject<(() => void) | null> | undefined;
   hideEmptyPlaceholder?: boolean;
@@ -625,13 +624,11 @@ const ConversationTimeline = memo(function ConversationTimeline({
   topFadeEnabled = false,
   historyControls,
   loadEarlier = null,
-  canvasActive = true,
-  rememberPosition = true,
-}: MessagesTimelineProps & { canvasActive?: boolean; rememberPosition?: boolean }) {
+}: MessagesTimelineProps) {
   const listIdentityKey = displayThreadKey ?? routeThreadKey;
   const rememberedPosition = useMemo(
-    () => (rememberPosition ? readTimelinePosition(listIdentityKey) : undefined),
-    [listIdentityKey, rememberPosition],
+    () => readTimelinePosition(listIdentityKey),
+    [listIdentityKey],
   );
   const [expandedRunIds, setExpandedRunIds] = useState<ReadonlySet<RunId>>(
     () => rememberedPosition?.disclosures?.runs ?? new Set(),
@@ -1173,7 +1170,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     if (restoringThreadPosition || state?.data !== rows) return;
     const isAtEnd = resolveTimelineIsAtEnd(state);
     const position = state?.data?.length ? resolveWorkGroupScrollAnchor(state) : undefined;
-    if (rememberPosition && position && state && isAtEnd !== undefined) {
+    if (position && state && isAtEnd !== undefined) {
       const index = state.indexByKey(position.rowId);
       const row = index === undefined ? undefined : state.elementAtIndex(index);
       const element = listRef.current?.getScrollableNode();
@@ -1241,7 +1238,6 @@ const ConversationTimeline = memo(function ConversationTimeline({
     paintedExpandedAttemptIds,
     workGroupViewState,
     rows,
-    rememberPosition,
     listIdentityKey,
     restoringThreadPosition,
     listRef,
@@ -1431,7 +1427,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   }, [historyControls, onOpenThread, parentThreadLink, topFadeEnabled]);
 
   const canvas = useChatCanvas();
-  const registerTimeline = canvasActive ? canvas?.registerTimeline : undefined;
+  const registerTimeline = canvas?.registerTimeline;
   const setTimelineList = useCallback(
     (list: LegendListRef | null) => {
       listRef.current = list;
@@ -1451,29 +1447,34 @@ const ConversationTimeline = memo(function ConversationTimeline({
         isWorking,
         runlessWorkActive,
       });
+      const entryById = new Map(timelineEntries.map((entry) => [entry.id, entry]));
       return readThreadFindPosition(
         timelineViewportElement,
         query,
         (rowId) => {
           const rowIndex = rows.findIndex((row) => row.id === rowId);
           for (const row of rows.slice(Math.max(0, rowIndex))) {
+            // Ordinary rows map to one entry by id; only folds need a scan.
+            if (row.kind !== "turn-fold" && row.kind !== "attempt-fold") {
+              const entry = entryById.get(row.kind === "assistant-meta" ? row.message.id : row.id);
+              if (entry && (entry.kind === "message" || entry.kind === "proposed-plan"))
+                return entry.id;
+              continue;
+            }
             const entry = timelineEntries.find((entry) => {
-              if (row.kind === "turn-fold" || row.kind === "attempt-fold") {
-                const runId =
-                  row.kind === "turn-fold"
-                    ? foldRunIds.get(entry.id)
-                    : entry.kind === "message"
-                      ? entry.message.runId
-                      : entry.kind === "proposed-plan"
-                        ? entry.proposedPlan.runId
-                        : null;
-                return (
-                  runId === row.runId &&
-                  (entry.kind !== "message" || entry.message.role === "assistant") &&
-                  (row.kind !== "attempt-fold" || entry.attempt?.id === row.attemptId)
-                );
-              }
-              return entry.id === (row.kind === "assistant-meta" ? row.message.id : row.id);
+              const runId =
+                row.kind === "turn-fold"
+                  ? foldRunIds.get(entry.id)
+                  : entry.kind === "message"
+                    ? entry.message.runId
+                    : entry.kind === "proposed-plan"
+                      ? entry.proposedPlan.runId
+                      : null;
+              return (
+                runId === row.runId &&
+                (entry.kind !== "message" || entry.message.role === "assistant") &&
+                (row.kind !== "attempt-fold" || entry.attempt?.id === row.attemptId)
+              );
             });
             if (entry && (entry.kind === "message" || entry.kind === "proposed-plan"))
               return entry.id;

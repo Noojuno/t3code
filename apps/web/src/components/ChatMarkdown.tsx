@@ -1349,7 +1349,8 @@ function ChatMarkdownMediaUnavailableLabel(props: {
 }) {
   const label = props.kind === "video" ? "Video unavailable" : "Image unavailable";
   return (
-    <span className="inline-flex items-center gap-1.5">
+    // Find indexes no image text, so this fallback must not highlight either.
+    <span data-thread-find-ignore className="inline-flex items-center gap-1.5">
       <TriangleAlertIcon aria-hidden className="size-3.5 shrink-0" />
       {props.alt.length > 0 ? `${label} · ${props.alt}` : label}
     </span>

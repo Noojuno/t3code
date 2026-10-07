@@ -205,14 +205,11 @@ function markdownThreadFindText(
   return segments;
 }
 
-export function searchablePlanSegments(
-  markdown: string,
-  cwd?: string,
-  skills: readonly InlineSkill[] = [],
-): readonly string[] {
+/** Plans render `$skill` tokens literally (no skill chips), so they are indexed as written. */
+export function searchablePlanSegments(markdown: string, cwd?: string): readonly string[] {
   return [
     proposedPlanTitle(markdown) ?? "Proposed plan",
-    ...markdownThreadFindText(stripDisplayedPlanMarkdown(markdown), false, cwd, skills),
+    ...markdownThreadFindText(stripDisplayedPlanMarkdown(markdown), false, cwd, []),
   ];
 }
 

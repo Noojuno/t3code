@@ -8040,8 +8040,8 @@ export default function ChatView(props: ChatViewProps) {
         return;
       }
 
-      // Drafts have nothing to search; leave Mod+F to the browser.
-      if (command === "chat.find" && isServerThread) {
+      // Drafts and servers without thread search leave Mod+F to the browser.
+      if (command === "chat.find" && isServerThread && serverConfig?.threadFind === true) {
         event.preventDefault();
         event.stopPropagation();
         openThreadFind();
@@ -8278,6 +8278,7 @@ export default function ChatView(props: ChatViewProps) {
     scriptKeybindings,
     handleUnsettleActiveThread,
     isServerThread,
+    serverConfig?.threadFind,
     onInterrupt,
     onToggleDiff,
     pinThread,
@@ -11428,7 +11429,6 @@ export default function ChatView(props: ChatViewProps) {
                 onContentOverflowChange={setTimelineOverflows}
                 onToolOutputCollapsedAtEnd={onToolOutputCollapsedAtEnd}
                 onManualNavigation={cancelTimelineLiveFollowForUserNavigation}
-                onResumeLiveFollow={scrollToEnd}
                 cancelPositionRestoreRef={cancelPositionRestoreRef}
                 hideEmptyPlaceholder={isDraftHeroState || threadDetailLoading}
                 topFadeEnabled={!hasTimelineTopBanner}
