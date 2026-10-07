@@ -62,4 +62,11 @@ describe("resolvePathLinkTarget", () => {
       resolvePathLinkTarget("C:/Users/julius/project/src/main.ts:12", "C:\\Users\\julius\\project"),
     ).toBe("C:/Users/julius/project/src/main.ts:12");
   });
+
+  it.each([
+    ["C:\\Users\\julius\\project", "C:\\Users\\julius\\notes.md:3"],
+    ["C:/Users/julius/project", "C:/Users/julius\\notes.md:3"],
+  ])("resolves home paths against the Windows cwd %s", (cwd, expected) => {
+    expect(resolvePathLinkTarget("~/notes.md:3", cwd)).toBe(expected);
+  });
 });

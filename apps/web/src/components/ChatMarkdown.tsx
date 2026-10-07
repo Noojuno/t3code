@@ -327,15 +327,17 @@ function CodexArtifactTemplateCard(props: {
             <SparklesIcon aria-hidden className="size-2.5" />
           </span>
         </span>
-        <span className="min-w-0">
-          <span className="block truncate text-sm font-medium text-foreground">
+        {/* Block elements keep the name and label separate thread-find segments. */}
+        <div className="min-w-0">
+          <div className="truncate text-sm font-medium text-foreground">
             {props.template.displayName}
-          </span>
-          <span className="block text-xs text-muted-foreground">{presentationLabel}</span>
-        </span>
+          </div>
+          <div className="text-xs text-muted-foreground">{presentationLabel}</div>
+        </div>
       </div>
       {props.onUse ? (
         <Button
+          data-thread-find-ignore
           type="button"
           size="sm"
           variant="outline"

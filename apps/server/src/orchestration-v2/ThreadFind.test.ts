@@ -446,7 +446,45 @@ describe("V2 thread find", () => {
       const deleted = thread(threadId, projectId, { deletedAt: at(3) });
       if (deleted.type !== "thread.created") return;
       yield* commit([{ ...deleted, id: EventId.make("deleted"), type: "thread.deleted" }]);
-      yield* Effect.flip(projection.searchThread({ threadId, query: "needle" }));
+      const error = yield* Effect.flip(projection.searchThread({ threadId, query: "needle" }));
+      assert.equal(error._tag, "ProjectionStoreThreadNotFoundError");
     }).pipe(Effect.provide(layerTest)),
+  );
+
+  it.effect("memory store resolves worktree file labels and rejects deleted threads", () =>
+    Effect.gen(function* () {
+      const projection = yield* ProjectionStore.ProjectionStoreV2;
+      const created = thread(threadId, projectId);
+      if (created.type !== "thread.created") return;
+      const withWorktree = {
+        ...created,
+        payload: { ...created.payload, worktreePath: "/work/tree" },
+      };
+      const message = item("file", 1, "See `docs/notes.md:12`.");
+      yield* Effect.forEach(
+        [
+          withWorktree,
+          run(),
+          {
+            id: EventId.make("file"),
+            threadId,
+            occurredAt: at(1),
+            type: "turn-item.updated",
+            payload: message,
+          },
+        ] satisfies OrchestrationV2DomainEvent[],
+        projection.apply,
+        { discard: true },
+      );
+      assert.equal(
+        (yield* projection.searchThread({ threadId, query: "notes.md · L12" })).totalMatches,
+        1,
+      );
+      const deleted = thread(threadId, projectId, { deletedAt: at(3) });
+      if (deleted.type !== "thread.created") return;
+      yield* projection.apply({ ...deleted, id: EventId.make("deleted"), type: "thread.deleted" });
+      const error = yield* Effect.flip(projection.searchThread({ threadId, query: "notes" }));
+      assert.equal(error._tag, "ProjectionStoreThreadNotFoundError");
+    }).pipe(Effect.provide(ProjectionStore.layerMemory)),
   );
 });

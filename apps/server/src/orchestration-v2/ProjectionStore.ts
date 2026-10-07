@@ -6271,17 +6271,21 @@ export const layerMemory: Layer.Layer<ProjectionStoreV2> = Layer.effect(
           ),
         ),
       searchThread: (input) =>
-        service
-          .getThreadSnapshot(input.threadId)
-          .pipe(
-            Effect.map((snapshot) =>
-              findProjectedThreadItems(
-                snapshot.projection.visibleTurnItems,
-                input,
-                snapshot.snapshotSequence,
-              ),
-            ),
+        service.getThreadSnapshot(input.threadId).pipe(
+          Effect.flatMap(({ projection, snapshotSequence }) =>
+            projection.thread.deletedAt !== null
+              ? Effect.fail(new ProjectionStoreThreadNotFoundError({ threadId: input.threadId }))
+              : Effect.succeed(
+                  // This store has no project records, so only worktree paths resolve labels.
+                  findProjectedThreadItems(
+                    projection.visibleTurnItems,
+                    input,
+                    snapshotSequence,
+                    projection.thread.worktreePath ?? undefined,
+                  ),
+                ),
           ),
+        ),
       getTimelinePage: (threadId, options) =>
         service.getThreadProjection(threadId).pipe(
           Effect.map((projection) => {

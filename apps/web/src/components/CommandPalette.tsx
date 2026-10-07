@@ -3108,6 +3108,15 @@ function OpenCommandPaletteDialog(props: {
       void copyActiveThreadReference();
       return;
     }
+    // ChatView ignores shortcuts while the palette is open, so handle find here
+    // instead of letting the browser's own Find open.
+    if (command === "chat.find" && activeThreadId && !event.nativeEvent.isComposing) {
+      event.preventDefault();
+      event.stopPropagation();
+      setOpen(false);
+      requestThreadFindOpen();
+      return;
+    }
 
     if (addProjectCloneFlow?.step === "repository" && event.key === "Enter") {
       event.preventDefault();

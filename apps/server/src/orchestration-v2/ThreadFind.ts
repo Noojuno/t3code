@@ -14,7 +14,11 @@ import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import * as SqlClient from "effect/sql/SqlClient";
-import { ProjectionStoreReadError, type ProjectionStoreV2Error } from "./ProjectionStore.ts";
+import {
+  ProjectionStoreReadError,
+  ProjectionStoreThreadNotFoundError,
+  type ProjectionStoreV2Error,
+} from "./ProjectionStore.ts";
 
 interface FindRow {
   readonly position: number;
@@ -173,6 +177,9 @@ export const makeThreadFind = Effect.fn("makeThreadFind")(function* (
     Schema.fromJsonString(Schema.Array(Schema.Struct({ threadId: ThreadId, id: TurnItemId }))),
   );
   const decodeItem = Schema.decodeUnknownEffect(Schema.fromJsonString(OrchestrationV2TurnItemJson));
+  const isSnapshotError = Schema.is(
+    Schema.Union([ProjectionStoreReadError, ProjectionStoreThreadNotFoundError]),
+  );
   const load = Effect.fn("ThreadFind.load")(function* (
     threadId: ThreadId,
     rows: readonly FindRow[],
@@ -218,7 +225,7 @@ export const makeThreadFind = Effect.fn("makeThreadFind")(function* (
       FROM orchestration_v2_projection_threads t JOIN projection_projects p ON p.project_id = t.project_id
       WHERE t.thread_id = ${threadId} AND t.deleted_at IS NULL AND p.deleted_at IS NULL
     `;
-      if (!active[0]) return yield* new ProjectionStoreReadError({ threadId });
+      if (!active[0]) return yield* new ProjectionStoreThreadNotFoundError({ threadId });
       const index = yield* readIndex(threadId);
       const sources = yield* encodeThreadIds([
         ...new Set([threadId, ...index.map((row) => row.sourceThreadId)]),
@@ -245,9 +252,7 @@ export const makeThreadFind = Effect.fn("makeThreadFind")(function* (
     (effect, threadId) =>
       effect.pipe(
         Effect.mapError((cause) =>
-          Schema.is(ProjectionStoreReadError)(cause)
-            ? cause
-            : new ProjectionStoreReadError({ threadId, cause }),
+          isSnapshotError(cause) ? cause : new ProjectionStoreReadError({ threadId, cause }),
         ),
       ),
   );

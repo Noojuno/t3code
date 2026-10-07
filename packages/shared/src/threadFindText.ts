@@ -3,7 +3,11 @@ import {
   formatProviderSkillDisplayName,
   type InlineSkill,
 } from "./inlineSkills.ts";
-import { renderCodexFileCitationsAsMarkdown } from "./codexMarkdownDirectives.ts";
+import {
+  artifactTemplateFromHastProperties,
+  renderCodexFileCitationsAsMarkdown,
+} from "./codexMarkdownDirectives.ts";
+import { codexArtifactTemplatePresentationLabel } from "./codexArtifactTemplates.ts";
 import {
   buildFileLinkParentSuffixByPath,
   splitFilePathPosition,
@@ -154,6 +158,16 @@ function markdownThreadFindText(
         text += fileLinkLabel(splitFilePathPosition(target), parentSuffixes);
         return;
       }
+    }
+    const template = artifactTemplateFromHastProperties(node.properties);
+    if (template) {
+      // Matches the card's visible text; its action button is not indexed.
+      flush();
+      segments.push(
+        template.displayName,
+        codexArtifactTemplatePresentationLabel(template.artifactKind),
+      );
+      return;
     }
     const block = THREAD_FIND_BLOCK_TAGS.has(node.tagName ?? "");
     if (block) flush();
