@@ -209,10 +209,6 @@ describe("V2 thread find", () => {
         const next = yield* projection.searchThread({ threadId, query: "needle", index: 4 });
         assert.equal(next.match?.entryId, "large:4");
         assert.equal(next.snapshotSequence, first.snapshotSequence);
-        assert.deepEqual(
-          next.items.map(({ item }) => item.id),
-          ["large:2", "large:3", "large:4", "large:5", "large:6"],
-        );
         assert.equal(parse.mock.calls.length, 0);
         yield* putItems([item("large:4", 5, `${text} needle`)], "changed");
         const changed = yield* projection.searchThread({ threadId, query: "needle", index: 5 });
@@ -324,7 +320,37 @@ describe("V2 thread find", () => {
     }).pipe(Effect.provide(layerTest)),
   );
 
-  it.effect("returns only nearby rows for a match beyond the recent history window", () =>
+  it.effect("starts at the reading position and wraps when no later match exists", () =>
+    Effect.gen(function* () {
+      const projection = yield* setup;
+      yield* putItems([
+        item("first", 1, "needle"),
+        item("reading", 2, "needle above, needle below"),
+        item("between", 3, "nothing"),
+        item("last", 4, "needle"),
+        item("end", 5, "nothing"),
+      ]);
+      const from = (entryId: string, occurrence = 0) =>
+        projection.searchThread({ threadId, query: "needle", start: { entryId, occurrence } });
+      assert.equal((yield* from("reading")).activeIndex, 1);
+      const below = yield* from("reading", 1);
+      assert.equal(below.activeIndex, 2);
+      assert.equal(below.match?.occurrence, 1);
+      assert.equal((yield* from("between")).match?.entryId, "last");
+      assert.equal((yield* from("reading", 2)).activeIndex, 3);
+      assert.equal((yield* from("end")).match?.entryId, "first");
+      assert.equal((yield* from("missing")).activeIndex, 0);
+      const explicit = yield* projection.searchThread({
+        threadId,
+        query: "needle",
+        start: { entryId: "last", occurrence: 0 },
+        index: 1,
+      });
+      assert.equal(explicit.match?.entryId, "reading");
+    }).pipe(Effect.provide(layerTest)),
+  );
+
+  it.effect("finds matches beyond the recent history window", () =>
     Effect.gen(function* () {
       const projection = yield* setup;
       const items = Array.from({ length: 520 }, (_, i) =>
@@ -336,12 +362,6 @@ describe("V2 thread find", () => {
       assert.equal(first.totalMatches, 2);
       assert.equal(first.match?.entryId, "message:8");
       assert.equal(last.match?.entryId, "message:510");
-      assert.lengthOf(first.items, 5);
-      assert.lengthOf(last.items, 5);
-      assert.deepEqual(
-        last.items.map((row) => row.item.id),
-        ["message:508", "message:509", "message:510", "message:511", "message:512"],
-      );
     }).pipe(Effect.provide(layerTest)),
   );
 
@@ -405,7 +425,7 @@ describe("V2 thread find", () => {
         yield* commit([event]);
         const result = yield* projection.searchThread({ threadId, query: "needle" });
         assert.equal(result.totalMatches, 0);
-        assert.deepEqual(result.items, []);
+        assert.isNull(result.match);
       }).pipe(Effect.provide(layerTest)),
   );
 
@@ -443,8 +463,6 @@ describe("V2 thread find", () => {
         const inherited = yield* projection.searchThread({ threadId, query: "needle" });
         assert.equal(inherited.totalMatches, 2);
         assert.equal(inherited.match?.entryId, "inherited");
-        assert.equal(inherited.items[0]?.visibility, "inherited");
-        assert.equal(inherited.items[0]?.sourceThreadId, parent);
         assert.equal(
           (yield* projection.searchThread({ threadId, query: "needle", index: 1 })).match?.entryId,
           "local",

@@ -221,6 +221,8 @@ import {
 } from "./MessagesTimeline.logic";
 import { type ThreadFindMatch } from "./threadFind";
 import { useThreadFindNavigation } from "./useThreadFindNavigation";
+import { readThreadFindPosition } from "./threadFindPosition";
+import type { ThreadFindPositionReader } from "./threadFind";
 import { TerminalContextInlineChip } from "./TerminalContextInlineChip";
 import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Spinner } from "../ui/spinner";
@@ -390,8 +392,6 @@ function TimelineListFooter({
     </div>
   );
 }
-const NOOP_SEARCH_LAYOUT = () => {};
-const EMPTY_FIND_DIFFS: MessagesTimelineProps["turnDiffSummaries"] = [];
 
 const EMPTY_TIMELINE_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">> = [];
 const TIMELINE_MAINTAIN_SCROLL_AT_END = {
@@ -515,8 +515,7 @@ interface MessagesTimelineProps {
   historyControls?: MessagesTimelineHistoryControls | undefined;
   /** Non-null when older turns exist beyond the loaded window. */
   loadEarlier?: CitationHistoryPage | null;
-  searchEntries?: ReadonlyArray<TimelineEntry> | null;
-  onCloseSearch?: () => void;
+  findPositionReaderRef?: React.RefObject<ThreadFindPositionReader | null>;
   findQuery?: string;
   activeFindMatch?: ThreadFindMatch | null;
   findNavigationId?: number;
@@ -527,83 +526,15 @@ interface MessagesTimelineProps {
 // ---------------------------------------------------------------------------
 
 export function MessagesTimeline(props: MessagesTimelineProps) {
-  const searchListRef = useRef<LegendListRef | null>(null);
-  const searchEntries = props.searchEntries;
-  const searching = searchEntries != null;
-  const origin = useRef<{ threadId: string; following: boolean } | null>(null);
-  const {
-    findOpen,
-    routeThreadKey: threadId,
-    liveFollowEnabled,
-    onManualNavigation,
-    onResumeLiveFollow,
-  } = props;
-  useLayoutEffect(() => {
-    if (origin.current?.threadId !== threadId) origin.current = null;
-    if (findOpen) {
-      if (!origin.current) {
-        origin.current = { threadId, following: liveFollowEnabled };
-        onManualNavigation();
-      }
-    } else if (origin.current) {
-      const following = origin.current.following;
-      origin.current = null;
-      if (following) onResumeLiveFollow?.();
-    }
-  }, [findOpen, threadId, liveFollowEnabled, onManualNavigation, onResumeLiveFollow]);
+  const { findOpen, onManualNavigation } = props;
+  useEffect(() => {
+    if (findOpen) onManualNavigation();
+  }, [findOpen, onManualNavigation]);
   return (
-    <div className="relative flex min-h-0 flex-1 flex-col">
-      <div
-        className={
-          searching ? "invisible absolute inset-0 flex flex-col" : "flex min-h-0 flex-1 flex-col"
-        }
-        inert={searching}
-      >
-        <ConversationTimeline
-          {...props}
-          canvasActive={!searching}
-          findQuery=""
-          activeFindMatch={null}
-          liveFollowEnabled={!findOpen && props.liveFollowEnabled}
-        />
-      </div>
-      {searchEntries && (
-        <>
-          <div className="flex items-center gap-3 border-b bg-background px-4 py-2 text-xs text-muted-foreground">
-            <span>Search result · nearby messages</span>
-            <Button variant="ghost" size="xs" onClick={props.onCloseSearch}>
-              Return to conversation
-            </Button>
-          </div>
-          <ConversationTimeline
-            {...props}
-            listRef={searchListRef}
-            timelineEntries={searchEntries}
-            loadEarlier={null}
-            historyControls={undefined}
-            rememberPosition={false}
-            cancelPositionRestoreRef={undefined}
-            worktreeSetup={null}
-            citationRequest={null}
-            anchorMessageId={null}
-            latestRun={null}
-            runningRunId={null}
-            turnDiffSummaries={EMPTY_FIND_DIFFS}
-            supportsConversationRollback={false}
-            isWorking={false}
-            runlessWorkActive={false}
-            activeTurnInProgress={false}
-            activeTurnStartedAt={null}
-            isPreparingWorktree={false}
-            isCompacting={false}
-            liveFollowEnabled={false}
-            onManualNavigation={NOOP_SEARCH_LAYOUT}
-            onIsAtEndChange={NOOP_SEARCH_LAYOUT}
-            onContentOverflowChange={NOOP_SEARCH_LAYOUT}
-          />
-        </>
-      )}
-    </div>
+    <ConversationTimeline
+      {...props}
+      liveFollowEnabled={!props.findOpen && props.liveFollowEnabled}
+    />
   );
 }
 
@@ -629,6 +560,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   findQuery = "",
   activeFindMatch = null,
   findNavigationId = 0,
+  findPositionReaderRef,
   latestRun,
   runningRunId = null,
   turnDiffSummaries,
@@ -867,6 +799,12 @@ const ConversationTimeline = memo(function ConversationTimeline({
   }, [latestRun]);
 
   const activeFindRunId = activeFindMatch?.runId;
+  useEffect(() => {
+    if (!activeFindRunId) return;
+    setExpandedRunIds((previous) =>
+      previous.has(activeFindRunId) ? previous : new Set(previous).add(activeFindRunId),
+    );
+  }, [activeFindRunId]);
   const visibleExpandedRunIds = useMemo(() => {
     if (!activeFindRunId || paintedExpandedRunIds.has(activeFindRunId)) {
       return paintedExpandedRunIds;
@@ -877,6 +815,12 @@ const ConversationTimeline = memo(function ConversationTimeline({
   const activeFindAttemptId = activeFindMatch
     ? timelineEntries.find((entry) => entry.id === activeFindMatch.entryId)?.attempt?.id
     : undefined;
+  useEffect(() => {
+    if (!activeFindAttemptId) return;
+    setExpandedAttemptIds((previous) =>
+      previous.has(activeFindAttemptId) ? previous : new Set(previous).add(activeFindAttemptId),
+    );
+  }, [activeFindAttemptId]);
   const visibleExpandedAttemptIds = useMemo(
     () =>
       activeFindAttemptId
@@ -1435,8 +1379,53 @@ const ConversationTimeline = memo(function ConversationTimeline({
     [listRef, registerTimeline],
   );
 
+  useLayoutEffect(() => {
+    if (!findPositionReaderRef || !timelineViewportElement) return;
+    const read: ThreadFindPositionReader = (query) =>
+      readThreadFindPosition(
+        timelineViewportElement,
+        query,
+        (rowId) => {
+          const rowIndex = rows.findIndex((row) => row.id === rowId);
+          for (const row of rows.slice(Math.max(0, rowIndex))) {
+            const entry = timelineEntries.find((entry) => {
+              if (row.kind === "turn-fold" || row.kind === "attempt-fold") {
+                const runId =
+                  entry.kind === "message"
+                    ? entry.message.runId
+                    : entry.kind === "proposed-plan"
+                      ? entry.proposedPlan.runId
+                      : null;
+                return (
+                  runId === row.runId &&
+                  (entry.kind !== "message" || entry.message.role === "assistant") &&
+                  (row.kind !== "attempt-fold" || entry.attempt?.id === row.attemptId)
+                );
+              }
+              return entry.id === (row.kind === "assistant-meta" ? row.message.id : row.id);
+            });
+            if (entry && (entry.kind === "message" || entry.kind === "proposed-plan"))
+              return entry.id;
+          }
+          return undefined;
+        },
+        contentInsetEndAdjustment,
+      );
+    findPositionReaderRef.current = read;
+    return () => {
+      if (findPositionReaderRef.current === read) findPositionReaderRef.current = null;
+    };
+  }, [
+    contentInsetEndAdjustment,
+    findPositionReaderRef,
+    rows,
+    timelineEntries,
+    timelineViewportElement,
+  ]);
+
   useThreadFindNavigation({
     listReady: findListReady,
+    historyControls,
     entries: timelineEntries,
     container: timelineViewportElement,
     query: normalizedFindQuery,
@@ -1527,6 +1516,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
                     : TIMELINE_MAINTAIN_SCROLL_AT_END
               }
               maintainVisibleContentPosition={
+                findActive ||
                 citationPositioning ||
                 (restoringThreadPosition && rememberedPosition?.atEnd === false)
                   ? false

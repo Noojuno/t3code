@@ -110,8 +110,21 @@ function countSegments(segments: readonly string[], query: string) {
   return segments.reduce((sum, text) => sum + countThreadSearchOccurrences(text, query), 0);
 }
 
-function selectMatch(documents: readonly FindDocument[], requestedIndex: number) {
+function selectMatch(
+  documents: readonly FindDocument[],
+  input: Pick<OrchestrationV2SearchThreadInput, "index" | "start">,
+) {
   const totalMatches = documents.reduce((sum, doc) => sum + doc.count, 0);
+  let requestedIndex = input.index ?? 0;
+  if (input.index === undefined && input.start) {
+    const startIndex = documents.findIndex((doc) => doc.entryId === input.start?.entryId);
+    if (startIndex >= 0) {
+      requestedIndex =
+        documents.slice(0, startIndex).reduce((sum, doc) => sum + doc.count, 0) +
+        Math.min(input.start.occurrence, documents[startIndex]!.count);
+      if (requestedIndex >= totalMatches) requestedIndex = 0;
+    }
+  }
   const activeIndex = Math.min(requestedIndex, Math.max(0, totalMatches - 1));
   let occurrence = activeIndex;
   for (const document of documents) {
@@ -121,7 +134,7 @@ function selectMatch(documents: readonly FindDocument[], requestedIndex: number)
   return { totalMatches, activeIndex, document: null, occurrence: 0 };
 }
 
-/** The memory projection uses the same match ordering and bounded context as SQLite. */
+/** The memory projection uses the same match ordering as SQLite. */
 export function findProjectedThreadItems(
   items: readonly OrchestrationV2ProjectedTurnItem[],
   input: OrchestrationV2SearchThreadInput,
@@ -135,27 +148,11 @@ export function findProjectedThreadItems(
       countSegments(parseText(textKey(row.item, cwd, input.skills ?? [])), input.query),
     ),
   );
-  return resultFor(rows, docs, input.index ?? 0, snapshotSequence);
-}
-
-function resultFor(
-  rows: readonly OrchestrationV2ProjectedTurnItem[],
-  docs: readonly FindDocument[],
-  requestedIndex: number,
-  snapshotSequence: number,
-): OrchestrationV2SearchThreadResult {
-  const selected = selectMatch(docs, requestedIndex);
-  const index = selected.document === null ? -1 : docs.indexOf(selected.document);
-  return resultForSelection(
-    selected,
-    index < 0 ? [] : rows.slice(Math.max(0, index - 2), index + 3),
-    snapshotSequence,
-  );
+  return resultForSelection(selectMatch(docs, input), snapshotSequence);
 }
 
 function resultForSelection(
   selected: ReturnType<typeof selectMatch>,
-  items: readonly OrchestrationV2ProjectedTurnItem[],
   snapshotSequence: number,
 ): OrchestrationV2SearchThreadResult {
   return {
@@ -170,7 +167,6 @@ function resultForSelection(
             runId: selected.document.runId,
             occurrence: selected.occurrence,
           },
-    items,
   };
 }
 
@@ -241,7 +237,7 @@ export const makeThreadFind = Effect.fn("makeThreadFind")(function* (
     lookup: (key: TextKey) => Effect.sync(() => parseText(key)),
   });
   // Retain counts and item references, never message bodies. Navigation checks
-  // the current revision in its transaction and loads only five context items.
+  // the current revision in its transaction without reloading message payloads.
   const scans = new Map<string, { sequence: number; documents: readonly FindDocument[] }>();
   const snapshot = Effect.fn("ThreadFind.snapshot")(
     function* (input: OrchestrationV2SearchThreadInput) {
@@ -271,13 +267,10 @@ export const makeThreadFind = Effect.fn("makeThreadFind")(function* (
       });
       const cached = scans.get(cacheKey);
       if (cached?.sequence === sequence) {
-        const selected = selectMatch(cached.documents, input.index ?? 0);
-        const index = selected.document === null ? -1 : cached.documents.indexOf(selected.document);
-        const context = index < 0 ? [] : cached.documents.slice(Math.max(0, index - 2), index + 3);
-        const items = yield* load(threadId, context);
+        const selected = selectMatch(cached.documents, input);
         scans.delete(cacheKey);
         scans.set(cacheKey, cached);
-        return { result: resultForSelection(selected, items, sequence) };
+        return { result: resultForSelection(selected, sequence) };
       }
       const candidates = index
         .map((row, position) => ({ ...row, position }))
@@ -326,6 +319,6 @@ export const makeThreadFind = Effect.fn("makeThreadFind")(function* (
       const oldest = scans.keys().next().value;
       if (oldest !== undefined) scans.delete(oldest);
     }
-    return resultFor(rows, documents, input.index ?? 0, sequence);
+    return resultForSelection(selectMatch(documents, input), sequence);
   });
 });

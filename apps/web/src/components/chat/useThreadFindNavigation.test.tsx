@@ -72,6 +72,30 @@ afterEach(async () => {
 });
 
 describe("find result navigation", () => {
+  it("loads history until a distant match can be revealed in the conversation", async () => {
+    const onLoadEarlier = vi.fn();
+    const historyControls = { hasMoreHistory: true, loading: false, error: null, onLoadEarlier };
+    const pending = { ...props, rowIndex: -1, entries: [{ id: "recent" }], historyControls };
+    await act(async () => root.render(<Probe {...pending} />));
+    expect(onLoadEarlier).toHaveBeenCalledTimes(1);
+    expect(scrollToIndex).not.toHaveBeenCalled();
+    await act(async () =>
+      root.render(<Probe {...pending} historyControls={{ ...historyControls, loading: true }} />),
+    );
+    expect(onLoadEarlier).toHaveBeenCalledTimes(1);
+    await act(async () =>
+      root.render(<Probe {...pending} entries={[{ id: "older" }, ...pending.entries]} />),
+    );
+    expect(onLoadEarlier).toHaveBeenCalledTimes(2);
+    rect = new DOMRect(0, 1800, 40, 20);
+    scrollToIndex.mockImplementationOnce(async () => {
+      rect = new DOMRect(0, 200, 40, 20);
+    });
+    await act(async () => root.render(<Probe {...props} historyControls={historyControls} />));
+    expect(onLoadEarlier).toHaveBeenCalledTimes(2);
+    expect(scrollToIndex).toHaveBeenCalledTimes(1);
+  });
+
   it("waits for list bootstrap before positioning the first result", async () => {
     rect = new DOMRect(0, 1800, 40, 20);
     await act(async () => root.render(<Probe {...props} listReady={false} />));

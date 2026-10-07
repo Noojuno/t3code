@@ -1,4 +1,7 @@
-import type { RunId } from "@t3tools/contracts";
+import type { OrchestrationV2SearchThreadInput, RunId } from "@t3tools/contracts";
+
+export type ThreadFindStart = NonNullable<OrchestrationV2SearchThreadInput["start"]>;
+export type ThreadFindPositionReader = (query: string) => ThreadFindStart | undefined;
 
 /** One occurrence of the query inside a searchable timeline entry. */
 export interface ThreadFindMatch {

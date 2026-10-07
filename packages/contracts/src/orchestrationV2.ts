@@ -3498,6 +3498,10 @@ export const OrchestrationV2SearchThreadInput = Schema.Struct({
   ),
   query: TrimmedNonEmptyString.check(Schema.isMaxLength(200)),
   index: Schema.optionalKey(NonNegativeInt),
+  // Used only before an explicit match index is selected.
+  start: Schema.optionalKey(
+    Schema.Struct({ entryId: TrimmedNonEmptyString, occurrence: NonNegativeInt }),
+  ),
 });
 export type OrchestrationV2SearchThreadInput = typeof OrchestrationV2SearchThreadInput.Type;
 
@@ -3511,8 +3515,6 @@ export const OrchestrationV2SearchThreadResult = Schema.Struct({
   totalMatches: NonNegativeInt,
   activeIndex: NonNegativeInt,
   match: Schema.NullOr(OrchestrationV2ThreadFindMatch),
-  // Search context is separate from the client's contiguous history pages.
-  items: Schema.Array(OrchestrationV2ProjectedTurnItem),
 });
 export type OrchestrationV2SearchThreadResult = typeof OrchestrationV2SearchThreadResult.Type;
 

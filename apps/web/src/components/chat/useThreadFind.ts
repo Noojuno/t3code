@@ -2,11 +2,14 @@ import type { InlineSkill } from "@t3tools/shared/inlineSkills";
 import type { OrchestrationV2ThreadProjection, ScopedThreadRef } from "@t3tools/contracts";
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { deriveTimelineEntriesFromVisibleTurnItems } from "~/session-logic";
 import { orchestrationEnvironment } from "~/state/orchestration";
 import { useEnvironmentQuery } from "~/state/query";
 import { useDebouncedValue } from "~/state/queries";
-import { stepThreadFindIndex } from "./threadFind";
+import {
+  stepThreadFindIndex,
+  type ThreadFindPositionReader,
+  type ThreadFindStart,
+} from "./threadFind";
 import { subscribeThreadFindOpen } from "./threadFindActionBus";
 import { toastManager } from "../ui/toast";
 
@@ -15,7 +18,8 @@ const EMPTY_SKILLS: readonly InlineSkill[] = [];
 const CLOSED_FIND = {
   threadKey: null as string | null,
   query: "",
-  activeIndex: 0,
+  activeIndex: null as number | null,
+  start: undefined as ThreadFindStart | undefined,
   focusRequestId: 0,
   navigationId: 0,
 };
@@ -32,6 +36,7 @@ export function useThreadFind({
   skills?: readonly InlineSkill[];
   content: Pick<OrchestrationV2ThreadProjection, "visibleTurnItems" | "runs"> | undefined;
 }) {
+  const findPositionReaderRef = useRef<ThreadFindPositionReader | null>(null);
   const threadKey = thread ? scopedThreadKey(thread) : null;
   const [state, setState] = useState(CLOSED_FIND);
   if (state.threadKey !== null && (!enabled || state.threadKey !== threadKey))
@@ -61,6 +66,7 @@ export function useThreadFind({
     state.query,
     state.activeIndex,
     state.navigationId,
+    state.start,
     content,
     skills,
   );
@@ -71,21 +77,10 @@ export function useThreadFind({
       : null;
   const count = remote.data?.totalMatches ?? 0;
   const activeIndex = remote.data?.activeIndex ?? 0;
-  const searchItems = remote.data?.match ? remote.data.items : null;
-  const searchEntries = useMemo(
-    () =>
-      searchItems
-        ? deriveTimelineEntriesFromVisibleTurnItems({
-            visibleTurnItems: searchItems,
-            optimisticMessages: [],
-          })
-        : null,
-    [searchItems],
-  );
   const step = (delta: number) =>
     setState((previous) => ({
       ...previous,
-      activeIndex: stepThreadFindIndex(previous.activeIndex, count, delta),
+      activeIndex: stepThreadFindIndex(previous.activeIndex ?? activeIndex, count, delta),
       navigationId: previous.navigationId + 1,
     }));
 
@@ -101,17 +96,18 @@ export function useThreadFind({
       status,
       focusRequestId: state.focusRequestId,
       onRetry: remote.refresh,
-      onQueryChange: (query: string) =>
-        setState((previous) => ({ ...previous, query, activeIndex: 0 })),
+      onQueryChange: (query: string) => {
+        const start = findPositionReaderRef.current?.(query.trim());
+        setState((previous) => ({ ...previous, query, activeIndex: null, start }));
+      },
       onNext: () => step(1),
       onPrevious: () => step(-1),
       onClose: close,
     },
     timelineProps: {
       findOpen: isOpen,
-      searchEntries,
-      onCloseSearch: close,
-      findQuery: isOpen && searchEntries !== null ? state.query : "",
+      findPositionReaderRef,
+      findQuery: isOpen && remote.data?.match ? state.query : "",
       activeFindMatch: remote.data?.match ?? null,
       findNavigationId: remote.navigationId,
     },
@@ -122,8 +118,9 @@ export function useThreadFind({
 function useServerResults(
   thread: ScopedThreadRef | null,
   query: string,
-  index: number,
+  index: number | null,
   navigationId: number,
+  start: ThreadFindStart | undefined,
   content: Pick<OrchestrationV2ThreadProjection, "visibleTurnItems" | "runs"> | undefined,
   skills: readonly InlineSkill[],
 ) {
@@ -137,7 +134,12 @@ function useServerResults(
     thread && debouncedQuery && normalizedQuery === debouncedQuery
       ? orchestrationEnvironment.threadFind({
           environmentId: thread.environmentId,
-          input: { threadId: thread.threadId, query: debouncedQuery, index, skills: skillLabels },
+          input: {
+            threadId: thread.threadId,
+            query: debouncedQuery,
+            ...(index === null ? (start ? { start } : {}) : { index }),
+            skills: skillLabels,
+          },
         })
       : null;
   const result = useEnvironmentQuery(atom);
@@ -153,11 +155,10 @@ function useServerResults(
     if (atom !== null) refresh();
   }, [atom, refresh, settledRevision]);
   const key = thread
-    ? JSON.stringify([thread.environmentId, thread.threadId, normalizedQuery])
+    ? JSON.stringify([thread.environmentId, thread.threadId, normalizedQuery, start])
     : null;
   const [previous, setPrevious] = useState({
     key,
-    response: result.data,
     data: result.data,
     navigationId,
   });
@@ -165,24 +166,12 @@ function useServerResults(
     previous.key !== key ||
     (result.data !== null &&
       !result.isPending &&
-      (previous.response !== result.data || previous.navigationId !== navigationId))
+      (previous.data !== result.data || previous.navigationId !== navigationId))
   ) {
     const response = result.data;
-    const keepContext =
-      previous.key === key &&
-      response?.match !== null &&
-      response?.snapshotSequence === previous.data?.snapshotSequence &&
-      previous.data?.items.some(
-        ({ item }) =>
-          (item.type === "user_message" || item.type === "assistant_message"
-            ? item.messageId
-            : item.id) === response?.match?.entryId,
-      );
-    const retainedItems = keepContext ? previous.data?.items : undefined;
     setPrevious({
       key,
-      response,
-      data: response && retainedItems ? { ...response, items: retainedItems } : response,
+      data: response,
       navigationId,
     });
   }

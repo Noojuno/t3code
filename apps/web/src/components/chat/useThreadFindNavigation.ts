@@ -1,5 +1,5 @@
 import type { LegendListRef } from "@legendapp/list/react";
-import { useCallback, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
 import type { ThreadFindMatch } from "./threadFind";
 import { useThreadFindHighlights } from "./threadFindHighlights";
 
@@ -16,6 +16,7 @@ export function useThreadFindNavigation({
   listRef,
   contentInsetEndAdjustment,
   listReady,
+  historyControls,
 }: {
   container: HTMLElement | null;
   query: string;
@@ -26,12 +27,41 @@ export function useThreadFindNavigation({
   listRef: RefObject<LegendListRef | null>;
   contentInsetEndAdjustment: number;
   listReady: boolean;
+  historyControls?:
+    | {
+        readonly hasMoreHistory: boolean;
+        readonly loading: boolean;
+        readonly error: string | null;
+        readonly onLoadEarlier: () => void;
+      }
+    | undefined;
 }) {
   const matchKey = match ? `${navigationId}:${query}:${match.entryId}:${match.occurrence}` : null;
   const positionedMatchRef = useRef<string | null>(null);
   const [positionedMatchKey, setPositionedMatchKey] = useState<string | null>(null);
   const revealedMatchRef = useRef<string | null>(null);
   const positionedEntriesRef = useRef<typeof entries | null>(null);
+  const requestedPagesRef = useRef<{ key: string | null; pages: Set<string> }>({
+    key: null,
+    pages: new Set(),
+  });
+  useEffect(() => {
+    if (requestedPagesRef.current.key !== matchKey)
+      requestedPagesRef.current = { key: matchKey, pages: new Set() };
+    if (
+      !match ||
+      !listReady ||
+      rowIndex >= 0 ||
+      entries.some((entry) => entry.id === match.entryId)
+    )
+      return;
+    if (!historyControls?.hasMoreHistory || historyControls.loading || historyControls.error)
+      return;
+    const cursor = entries[0]?.id ?? "first";
+    if (requestedPagesRef.current.pages.has(cursor)) return;
+    requestedPagesRef.current.pages.add(cursor);
+    historyControls.onLoadEarlier();
+  }, [entries, historyControls, listReady, match, matchKey, rowIndex]);
   const reveal = useCallback(
     (range: Range | null) => {
       if (!matchKey) {
@@ -40,7 +70,7 @@ export function useThreadFindNavigation({
         return;
       }
       if (revealedMatchRef.current === matchKey) return;
-      if (!listReady) return;
+      if (!listReady || rowIndex < 0) return;
       const materialize = () => {
         const list = listRef.current;
         if (rowIndex < 0 || !list || positionedMatchRef.current === matchKey) return;

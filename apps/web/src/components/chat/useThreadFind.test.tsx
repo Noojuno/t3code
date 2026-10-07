@@ -3,15 +3,11 @@ import { create, type ReactTestRenderer } from "react-test-renderer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import {
   EnvironmentId,
-  MessageId,
-  PlanId,
   RunId,
   ThreadId,
-  TurnItemId,
   type OrchestrationV2SearchThreadInput,
   type OrchestrationV2SearchThreadResult,
 } from "@t3tools/contracts";
-import * as DateTime from "effect/DateTime";
 import { useThreadFind } from "./useThreadFind";
 import { orchestrationEnvironment } from "~/state/orchestration";
 import { requestThreadFindOpen } from "./threadFindActionBus";
@@ -45,7 +41,6 @@ const a = EnvironmentId.make("environment:a");
 const b = EnvironmentId.make("environment:b");
 const threadId = ThreadId.make("shared-thread");
 const runId = RunId.make("run:plan");
-const now = DateTime.makeUnsafe("2026-10-01T00:00:00Z");
 function Probe({
   environmentId,
   enabled = true,
@@ -83,83 +78,40 @@ describe("V2 find state", () => {
       totalMatches: 10,
       activeIndex: index,
       match: { entryId: `message:${index + 2}`, runId, occurrence: 0 },
-      items: Array.from({ length: 5 }, (_, offset) => {
-        const position = index + offset;
-        return {
-          position,
-          sourceThreadId: threadId,
-          sourceItemId: TurnItemId.make(`item:${position}`),
-          visibility: "local",
-          item: {
-            id: TurnItemId.make(`item:${position}`),
-            messageId: MessageId.make(`message:${position}`),
-            threadId,
-            runId,
-            nodeId: null,
-            providerThreadId: null,
-            providerTurnId: null,
-            nativeItemRef: null,
-            parentItemId: null,
-            ordinal: position,
-            status: "completed",
-            title: null,
-            startedAt: now,
-            completedAt: now,
-            updatedAt: now,
-            type: "assistant_message",
-            text: `COD4 progress ${position}`,
-            streaming: false,
-          },
-        };
-      }),
     };
   }
 
-  it("keeps nearby messages stable until the next match leaves the current window", async () => {
-    queries.results.set(a, messageResult(0));
+  it("starts from the viewport and steps from the server-selected match", async () => {
+    queries.results.set(a, messageResult(4));
     await act(async () => {
       renderer = create(<Probe environmentId={a} />);
     });
     await act(async () => find.open());
+    find.timelineProps.findPositionReaderRef.current = () => ({
+      entryId: "message:6",
+      occurrence: 1,
+    });
     await act(async () => find.barProps.onQueryChange("COD4"));
-    const originalEntries = find.timelineProps.searchEntries;
-    for (const index of [1, 2]) {
-      queries.results.set(a, messageResult(index));
-      await act(async () => find.barProps.onNext());
-      expect(find.timelineProps.searchEntries).toBe(originalEntries);
-      expect(find.timelineProps.activeFindMatch?.entryId).toBe(`message:${index + 2}`);
-      expect(find.barProps.activeIndex).toBe(index);
-    }
-    queries.results.set(a, messageResult(3));
+    expect(orchestrationEnvironment.threadFind).toHaveBeenLastCalledWith({
+      environmentId: a,
+      input: {
+        threadId,
+        query: "COD4",
+        skills: [],
+        start: { entryId: "message:6", occurrence: 1 },
+      },
+    });
+    expect(find.barProps.activeIndex).toBe(4);
+    queries.results.set(a, messageResult(5));
     await act(async () => find.barProps.onNext());
-    expect(find.timelineProps.searchEntries?.map((entry) => entry.id)).toEqual([
-      "message:3",
-      "message:4",
-      "message:5",
-      "message:6",
-      "message:7",
-    ]);
-    const nextEntries = find.timelineProps.searchEntries;
-    queries.results.set(a, messageResult(2));
+    expect(orchestrationEnvironment.threadFind).toHaveBeenLastCalledWith({
+      environmentId: a,
+      input: { threadId, query: "COD4", skills: [], index: 5 },
+    });
+    expect(find.timelineProps.activeFindMatch?.entryId).toBe("message:7");
+    queries.results.set(a, messageResult(4));
     await act(async () => find.barProps.onPrevious());
-    expect(find.timelineProps.searchEntries).toBe(nextEntries);
-  });
-
-  it("refreshes context when the snapshot or query changes", async () => {
-    queries.results.set(a, messageResult(0));
-    await act(async () => {
-      renderer = create(<Probe environmentId={a} />);
-    });
-    await act(async () => find.open());
-    await act(async () => find.barProps.onQueryChange("COD4"));
-    const originalEntries = find.timelineProps.searchEntries;
-    queries.results.set(a, messageResult(1, 10));
-    await act(async () => find.barProps.onNext());
-    expect(find.timelineProps.searchEntries).not.toBe(originalEntries);
-    expect(find.timelineProps.searchEntries?.[0]?.id).toBe("message:1");
-    queries.results.set(a, messageResult(0, 10));
-    await act(async () => find.barProps.onQueryChange("progress"));
-    expect(find.timelineProps.searchEntries?.[0]?.id).toBe("message:0");
+    expect(find.barProps.activeIndex).toBe(4);
   });
 
   it("does not navigate the previous result while a new match is loading", async () => {
@@ -212,7 +164,7 @@ describe("V2 find state", () => {
       requestThreadFindOpen();
     });
     expect(find.isOpen).toBe(false);
-    expect(find.timelineProps.searchEntries).toBeNull();
+    expect(find.timelineProps.activeFindMatch).toBeNull();
     expect(orchestrationEnvironment.threadFind).not.toHaveBeenCalled();
   });
 
@@ -228,7 +180,7 @@ describe("V2 find state", () => {
       renderer?.update(<Probe environmentId={a} enabled={false} />);
     });
     expect(find.isOpen).toBe(false);
-    expect(find.timelineProps.searchEntries).toBeNull();
+    expect(find.timelineProps.activeFindMatch).toBeNull();
     expect(find.timelineProps.findQuery).toBe("");
     expect(orchestrationEnvironment.threadFind).not.toHaveBeenCalled();
     await act(async () => {
@@ -239,40 +191,12 @@ describe("V2 find state", () => {
     expect(find.barProps.query).toBe("");
   });
 
-  it("derives a plan result with the timeline item ID and run ownership", async () => {
+  it("preserves plan item ID and run ownership for navigation", async () => {
     queries.results.set(a, {
       snapshotSequence: 9,
       totalMatches: 1,
       activeIndex: 0,
       match: { entryId: "plan-item", runId, occurrence: 0 },
-      items: [
-        {
-          position: 8,
-          sourceThreadId: threadId,
-          sourceItemId: TurnItemId.make("plan-item"),
-          visibility: "local",
-          item: {
-            id: TurnItemId.make("plan-item"),
-            threadId,
-            runId,
-            nodeId: null,
-            providerThreadId: null,
-            providerTurnId: null,
-            nativeItemRef: null,
-            parentItemId: null,
-            ordinal: 9,
-            status: "completed",
-            title: null,
-            startedAt: now,
-            completedAt: now,
-            updatedAt: now,
-            type: "proposed_plan",
-            planId: PlanId.make("plan-artifact"),
-            markdown: "# Release\nneedle",
-            streaming: false,
-          },
-        },
-      ],
     });
     await act(async () => {
       renderer = create(<Probe environmentId={a} />);
@@ -288,17 +212,10 @@ describe("V2 find state", () => {
       runId,
       occurrence: 0,
     });
-    const entry = find.timelineProps.searchEntries?.[0];
-    expect(entry?.id).toBe("plan-item");
-    expect(entry?.kind).toBe("proposed-plan");
-    if (entry?.kind === "proposed-plan") {
-      expect(entry.proposedPlan.id).toBe("plan-artifact");
-      expect(entry.proposedPlan.runId).toBe(runId);
-    }
     await act(async () => {
       find.close();
     });
-    expect(find.timelineProps.searchEntries).toBeNull();
+    expect(find.timelineProps.activeFindMatch).toBeNull();
     expect(find.timelineProps.findQuery).toBe("");
   });
 
@@ -308,14 +225,12 @@ describe("V2 find state", () => {
       totalMatches: 3,
       activeIndex: 0,
       match: null,
-      items: [],
     });
     queries.results.set(b, {
       snapshotSequence: 2,
       totalMatches: 0,
       activeIndex: 0,
       match: null,
-      items: [],
     });
     await act(async () => {
       renderer = create(<Probe environmentId={a} />);
@@ -331,7 +246,7 @@ describe("V2 find state", () => {
       renderer?.update(<Probe environmentId={b} />);
     });
     expect(find.isOpen).toBe(false);
-    expect(find.timelineProps.searchEntries).toBeNull();
+    expect(find.timelineProps.activeFindMatch).toBeNull();
     await act(async () => {
       find.open();
     });

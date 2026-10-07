@@ -15,7 +15,7 @@ interface ThreadFindRange {
 }
 
 /** Collects visible occurrences without modifying rendered markdown. */
-function collectThreadFindRanges(container: HTMLElement, query: string): ThreadFindRange[] {
+export function collectThreadFindRanges(container: HTMLElement, query: string): ThreadFindRange[] {
   if (query.length === 0) return [];
 
   const ranges: ThreadFindRange[] = [];
