@@ -61,6 +61,12 @@ export function createOrchestrationEnvironmentAtoms<R, E>(
       staleTimeMs: 0,
       idleTtlMs: 0,
     }),
+    threadFindProgressive: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+      label: "environment-data:orchestration:thread-find-progressive",
+      tag: ORCHESTRATION_V2_WS_METHODS.searchThreadStream,
+      completeWhen: (result) => result.complete !== false,
+      idleTtlMs: 0,
+    }),
     threadSearch: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:orchestration:thread-search",
       tag: ORCHESTRATION_V2_WS_METHODS.searchThreads,

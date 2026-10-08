@@ -47,6 +47,42 @@ afterEach(async () => {
 });
 
 describe("find highlight caching", () => {
+  it("checks only the old and new occurrence when cycling a message with many clipped matches", async () => {
+    container.innerHTML =
+      '<div data-timeline-row-id="first"><div data-thread-find-fold><p data-thread-find-text>' +
+      "COD4 ".repeat(1500) +
+      "</p></div></div>";
+    const bounds = vi.fn(() => new DOMRect(0, 0, 40, 20));
+    Object.defineProperty(Range.prototype, "getBoundingClientRect", {
+      configurable: true,
+      value: bounds,
+    });
+    container.querySelector<HTMLElement>("[data-thread-find-fold]")!.getBoundingClientRect = () =>
+      new DOMRect(0, 0, 800, 100);
+    const props = {
+      container,
+      query: "COD4",
+      activeRowId: "first",
+      activeOccurrence: 0,
+      onActiveRange,
+    };
+    try {
+      await act(async () => root.render(<Probe {...props} />));
+      const inactive = CSS.highlights.get("t3-thread-find");
+      const first = activeRanges()[0];
+      bounds.mockClear();
+      await act(async () => root.render(<Probe {...props} activeOccurrence={1} />));
+      expect(bounds).toHaveBeenCalledTimes(2);
+      expect(CSS.highlights.get("t3-thread-find")).toBe(inactive);
+      expect(inactive?.size).toBe(1499);
+      expect(inactive?.has(first!)).toBe(true);
+      expect(activeRanges()[0]?.startOffset).toBe(5);
+      expect(inactive?.has(activeRanges()[0]!)).toBe(false);
+    } finally {
+      Reflect.deleteProperty(Range.prototype, "getBoundingClientRect");
+    }
+  });
+
   it("repaints for searchable text changes but not for timers outside it", async () => {
     const timer = document.createElement("span");
     container.firstElementChild!.append(timer);

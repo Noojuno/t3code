@@ -10,6 +10,7 @@ interface ThreadFindBarProps {
   readonly open: boolean;
   readonly query: string;
   readonly matchCount: number;
+  readonly counting?: boolean;
   readonly status: "loading" | "error" | null;
   readonly onRetry: () => void;
   readonly activeIndex: number;
@@ -41,11 +42,12 @@ export function ThreadFindBar(props: ThreadFindBarProps) {
   const noResults = hasQuery && !props.status && props.matchCount === 0;
   let label = "";
   if (hasQuery) {
-    label = formatThreadFindCount(props.activeIndex, props.matchCount);
+    label = props.counting ? "1/…" : formatThreadFindCount(props.activeIndex, props.matchCount);
   }
   if (props.status === "loading") label = "Searching…";
   if (props.status === "error") label = "Search failed";
-  const navigationDisabled = props.matchCount === 0 || props.status === "loading";
+  const navigationDisabled =
+    props.matchCount === 0 || props.status === "loading" || props.counting === true;
   const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
     if (event.key === "Enter") {
@@ -63,7 +65,7 @@ export function ThreadFindBar(props: ThreadFindBarProps) {
       onContextMenu={(event) => event.stopPropagation()}
       role="search"
       aria-label="Find in thread"
-      aria-busy={props.status === "loading"}
+      aria-busy={props.status === "loading" || props.counting === true}
       className="absolute top-3 right-3 z-40 w-[min(24rem,calc(100%-1.5rem))]"
     >
       <InputGroupInput

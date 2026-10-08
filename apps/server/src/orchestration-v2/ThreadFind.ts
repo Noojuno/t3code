@@ -13,6 +13,7 @@ import * as Cache from "effect/Cache";
 import * as Data from "effect/Data";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 import {
   ProjectionStoreReadError,
@@ -25,6 +26,11 @@ interface FindRow {
   readonly visibility: OrchestrationV2ProjectedTurnItem["visibility"];
   readonly sourceThreadId: ThreadId;
   readonly sourceItemId: TurnItemId;
+}
+interface FindPayload extends FindRow {
+  readonly payload: string;
+  readonly entryId: string;
+  readonly type: OrchestrationV2TurnItem["type"];
 }
 interface FindDocument extends FindRow {
   readonly entryId: string;
@@ -151,17 +157,33 @@ export function findProjectedThreadItems(
       countSegments(parseText(textKey(row.item, cwd, input.skills ?? [])), input.query),
     ),
   );
-  return resultForSelection(selectMatch(docs, input), snapshotSequence);
+  return resultForSelection(selectMatch(docs, input), docs, snapshotSequence);
 }
 
 function resultForSelection(
   selected: ReturnType<typeof selectMatch>,
+  documents: readonly FindDocument[],
   snapshotSequence: number,
 ): OrchestrationV2SearchThreadResult {
+  let startIndex = 0;
+  const entries = documents.flatMap(({ entryId, runId, count }) => {
+    const entry = { entryId, runId, count, startIndex };
+    startIndex += count;
+    return count > 0 ? [entry] : [];
+  });
+  const selectedEntry = entries.findIndex((entry) => entry.entryId === selected.document?.entryId);
+  const navigation =
+    entries.length <= 17
+      ? entries
+      : Array.from(
+          { length: 17 },
+          (_, i) => entries[(selectedEntry + i - 8 + entries.length) % entries.length]!,
+        );
   return {
     snapshotSequence,
     totalMatches: selected.totalMatches,
     activeIndex: selected.activeIndex,
+    navigation,
     match:
       selected.document === null
         ? null
@@ -209,24 +231,37 @@ export const makeThreadFind = Effect.fn("makeThreadFind")(function* (
     const sources = yield* encodeSources(
       rows.map((row) => ({ threadId: row.sourceThreadId, id: row.sourceItemId })),
     ).pipe(Effect.mapError((cause) => new ProjectionStoreReadError({ threadId, cause })));
-    const payloads = yield* sql<{ thread_id: string; turn_item_id: string; payload_json: string }>`
-      SELECT item.thread_id, item.turn_item_id, item.payload_json
+    const payloads = yield* sql<{
+      thread_id: string;
+      turn_item_id: string;
+      payload_json: string;
+      entry_id: string;
+      item_type: OrchestrationV2TurnItem["type"];
+    }>`
+      SELECT item.thread_id, item.turn_item_id, item.payload_json,
+        COALESCE(json_extract(item.payload_json, '$.messageId'), item.turn_item_id) AS entry_id,
+        json_extract(item.payload_json, '$.type') AS item_type
       FROM orchestration_v2_projection_turn_items AS item
       JOIN json_each(${sources}) AS wanted
         ON item.thread_id = json_extract(wanted.value, '$.threadId')
           AND item.turn_item_id = json_extract(wanted.value, '$.id')
     `.pipe(Effect.mapError((cause) => new ProjectionStoreReadError({ threadId, cause })));
-    const byThread = new Map<string, Map<string, string>>();
+    const byThread = new Map<string, Map<string, (typeof payloads)[number]>>();
     for (const row of payloads) {
       let items = byThread.get(row.thread_id);
       if (!items) byThread.set(row.thread_id, (items = new Map()));
-      items.set(row.turn_item_id, row.payload_json);
+      items.set(row.turn_item_id, row);
     }
     return yield* Effect.forEach(rows, (row) => {
       const payload = byThread.get(row.sourceThreadId)?.get(row.sourceItemId);
       return payload === undefined
         ? Effect.fail(new ProjectionStoreReadError({ threadId }))
-        : Effect.succeed({ ...row, payload });
+        : Effect.succeed({
+            ...row,
+            payload: payload.payload_json,
+            entryId: payload.entry_id,
+            type: payload.item_type,
+          });
     });
   });
   // Cache rendered segments, not queries; typing and navigation reuse Markdown parsing.
@@ -291,7 +326,7 @@ export const makeThreadFind = Effect.fn("makeThreadFind")(function* (
         const selected = selectMatch(cached.documents, input);
         scans.delete(cacheKey);
         scans.set(cacheKey, cached);
-        return { result: resultForSelection(selected, cached.sequence) };
+        return { result: resultForSelection(selected, cached.documents, cached.sequence) };
       }
       const index = yield* readIndex(threadId);
       const sourceThreadIds = [...new Set([threadId, ...index.map((row) => row.sourceThreadId)])];
@@ -303,7 +338,7 @@ export const makeThreadFind = Effect.fn("makeThreadFind")(function* (
             row.item.type,
           ),
         );
-      const payloads: (FindRow & { readonly payload: string })[] = [];
+      const payloads: FindPayload[] = [];
       for (let start = 0; start < candidates.length; start += 128) {
         payloads.push(...(yield* load(threadId, candidates.slice(start, start + 128))));
       }
@@ -319,43 +354,96 @@ export const makeThreadFind = Effect.fn("makeThreadFind")(function* (
         ),
       ),
   );
-  return Effect.fn("ProjectionStore.searchThread")(function* (
-    input: OrchestrationV2SearchThreadInput,
-  ) {
-    // Release the SQLite connection before parsing. All rows and their revision
-    // come from one snapshot, including inherited fork history.
-    const data = yield* snapshot(input);
-    if (data.result) return data.result;
-    const { payloads, cwd, sequence, cacheKey, sourceThreadIds } = data;
-    // Decode after the snapshot so the write lock is not held for it.
-    const items: OrchestrationV2ProjectedTurnItem[] = yield* Effect.forEach(
-      payloads,
-      ({ payload, ...row }) =>
-        decodeItem(payload).pipe(
-          Effect.map((item) => ({ ...row, item })),
-          Effect.mapError(
-            (cause) => new ProjectionStoreReadError({ threadId: input.threadId, cause }),
-          ),
-        ),
+  const searchThreadStream = (input: OrchestrationV2SearchThreadInput) =>
+    Stream.unwrap(
+      Effect.gen(function* () {
+        // Release SQLite before decoding and parsing. Both frames describe one snapshot.
+        const data = yield* snapshot(input);
+        if (data.result) return Stream.succeed(data.result);
+        const { payloads, cwd, sequence, cacheKey, sourceThreadIds } = data;
+        const decode = (row: FindPayload) =>
+          decodeItem(row.payload).pipe(
+            Effect.map((item) => ({ ...row, item })),
+            Effect.mapError(
+              (cause) => new ProjectionStoreReadError({ threadId: input.threadId, cause }),
+            ),
+          );
+        // Answers rendered inside question cards must not appear as separate matches.
+        const foldedAnswers = new Set<string>();
+        for (const payload of payloads) {
+          if (payload.type !== "user_input_request") continue;
+          const { item } = yield* decode(payload);
+          if (item.type === "user_input_request" && item.questionAnswer)
+            foldedAnswers.add(`async-answer:${item.questionAnswer.requestId}`);
+        }
+        const rows = payloads.filter(
+          (row) =>
+            row.type !== "user_input_request" &&
+            !(row.type === "user_message" && foldedAnswers.has(row.entryId)),
+        );
+        const documents = new Map<number, FindDocument>();
+        const count = Effect.fnUntraced(function* (row: FindPayload) {
+          const cached = documents.get(row.position);
+          if (cached) return cached;
+          const decoded = yield* decode(row);
+          const key = textKey(decoded.item, cwd, input.skills ?? []);
+          const segments = yield* Cache.get(
+            key.text.length <= 32_768 ? textCache : largeTextCache,
+            key,
+          );
+          const document = documentFor(decoded, countSegments(segments, input.query));
+          documents.set(row.position, document);
+          yield* Effect.yieldNow;
+          return document;
+        });
+        const finish = Effect.gen(function* () {
+          for (const row of rows) yield* count(row);
+          const ordered = rows.map((row) => documents.get(row.position)!);
+          scans.delete(cacheKey);
+          scans.set(cacheKey, { sequence, documents: ordered, sourceThreadIds });
+          if (scans.size > 8) {
+            const oldest = scans.keys().next().value;
+            if (oldest !== undefined) scans.delete(oldest);
+          }
+          return resultForSelection(selectMatch(ordered, input), ordered, sequence);
+        });
+        // Relative navigation needs the final counts. Initial searches can reveal an
+        // identity immediately, scanning at/below the reading anchor before wrapping.
+        if (input.index !== undefined || (input.offset ?? 0) !== 0)
+          return Stream.fromEffect(finish);
+        const anchor = Math.max(
+          0,
+          rows.findIndex((row) => row.entryId === input.start?.entryId),
+        );
+        for (let step = 0; step <= rows.length; step++) {
+          const index = (anchor + step) % rows.length;
+          const row = rows[index];
+          if (!row) break;
+          const document = yield* count(row);
+          const occurrence =
+            step === 0 && row.entryId === input.start?.entryId
+              ? Math.min(input.start.occurrence, document.count)
+              : 0;
+          if (occurrence >= document.count) continue;
+          const first: OrchestrationV2SearchThreadResult = {
+            complete: false,
+            snapshotSequence: sequence,
+            totalMatches: 1,
+            activeIndex: 0,
+            match: { entryId: document.entryId, runId: document.runId, occurrence },
+          };
+          // The remainder is pulled only after the first frame has been delivered.
+          return Stream.concat(Stream.succeed(first), Stream.fromEffect(finish));
+        }
+        return Stream.fromEffect(finish);
+      }),
     );
-    const rows = searchableRows(items);
-    const skills = input.skills ?? [];
-    const documents: FindDocument[] = [];
-    for (const row of rows) {
-      const key = textKey(row.item, cwd, skills);
-      const segments = yield* Cache.get(
-        key.text.length <= 32_768 ? textCache : largeTextCache,
-        key,
-      );
-      documents.push(documentFor(row, countSegments(segments, input.query)));
-      yield* Effect.yieldNow;
-    }
-    scans.delete(cacheKey);
-    scans.set(cacheKey, { sequence, documents, sourceThreadIds });
-    if (scans.size > 8) {
-      const oldest = scans.keys().next().value;
-      if (oldest !== undefined) scans.delete(oldest);
-    }
-    return resultForSelection(selectMatch(documents, input), sequence);
-  });
+  return {
+    searchThreadStream,
+    searchThread: (input: OrchestrationV2SearchThreadInput) =>
+      searchThreadStream(input).pipe(
+        Stream.runCollect,
+        Effect.map((results) => results[results.length - 1]!),
+      ),
+  };
 });

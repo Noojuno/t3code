@@ -125,6 +125,7 @@ export function useThreadFindHighlights(input: {
   const { container, query, activeRowId, activeOccurrence, onActiveRange } = input;
 
   const rangesRef = useRef<readonly ThreadFindRange[]>([]);
+  const paintRef = useRef<ReturnType<typeof makeThreadFindHighlightPainter> | null>(null);
   const selectionRef = useRef({ activeRowId, activeOccurrence, onActiveRange });
   useLayoutEffect(() => {
     selectionRef.current = { activeRowId, activeOccurrence, onActiveRange };
@@ -132,7 +133,7 @@ export function useThreadFindHighlights(input: {
 
   useEffect(() => {
     if (typeof CSS === "undefined" || !CSS.highlights || typeof Highlight === "undefined") {
-      paintThreadFindHighlights([], selectionRef.current, container);
+      selectionRef.current.onActiveRange(null);
       return;
     }
     const clearHighlights = () => {
@@ -141,7 +142,7 @@ export function useThreadFindHighlights(input: {
     };
     rangesRef.current = [];
     if (!container || query.length === 0) {
-      paintThreadFindHighlights([], selectionRef.current, container);
+      selectionRef.current.onActiveRange(null);
       clearHighlights();
       return;
     }
@@ -149,6 +150,8 @@ export function useThreadFindHighlights(input: {
     // Selection changes reuse ranges. Only changed or newly mounted rows
     // need their text walked again; removed rows release their DOM references.
     const cache = new Map<Element, readonly ThreadFindRange[]>();
+    const paint = makeThreadFindHighlightPainter(container);
+    paintRef.current = paint;
     const repaint = () => {
       const rows = new Set(container.querySelectorAll("[data-timeline-row-id]"));
       const ranges: ThreadFindRange[] = [];
@@ -167,7 +170,7 @@ export function useThreadFindHighlights(input: {
       }
       for (const row of cache.keys()) if (!rows.has(row)) cache.delete(row);
       rangesRef.current = ranges;
-      paintThreadFindHighlights(ranges, selectionRef.current, container);
+      paint(ranges, selectionRef.current);
     };
     let frame: number | null = null;
     const observer = new MutationObserver((mutations) => {
@@ -208,55 +211,59 @@ export function useThreadFindHighlights(input: {
       observer.disconnect();
       if (frame !== null) cancelAnimationFrame(frame);
       cache.clear();
+      paintRef.current = null;
       rangesRef.current = [];
       clearHighlights();
     };
   }, [container, query]);
 
   useEffect(() => {
-    if (typeof CSS !== "undefined" && CSS.highlights && typeof Highlight !== "undefined")
-      paintThreadFindHighlights(
-        rangesRef.current,
-        {
-          activeRowId,
-          activeOccurrence,
-          onActiveRange,
-        },
-        container,
-      );
-  }, [activeOccurrence, activeRowId, onActiveRange, container]);
+    paintRef.current?.(rangesRef.current, { activeRowId, activeOccurrence, onActiveRange });
+  }, [activeOccurrence, activeRowId, onActiveRange]);
 }
 
-function paintThreadFindHighlights(
-  ranges: readonly ThreadFindRange[],
-  selection: Pick<
-    Parameters<typeof useThreadFindHighlights>[0],
-    "activeRowId" | "activeOccurrence" | "onActiveRange"
-  >,
-  container: HTMLElement | null,
-) {
-  if (typeof CSS === "undefined" || !CSS.highlights || typeof Highlight === "undefined") {
-    selection.onActiveRange(null);
-    return;
-  }
-  let active: Range | null = null;
-  const inactive: Range[] = [];
-  for (const match of ranges) {
-    if (
-      active === null &&
-      match.rowId === selection.activeRowId &&
-      match.occurrence === selection.activeOccurrence
-    )
-      active = match.range;
-    else if (container && foldsHiding(match.range, container).length === 0)
-      inactive.push(match.range);
-  }
-  if (active && container && revealFolded(active, container)) {
-    selection.onActiveRange(null);
-    active = null;
-  } else {
-    selection.onActiveRange(active);
-  }
-  CSS.highlights.set(THREAD_FIND_HIGHLIGHT_NAME, new Highlight(...inactive));
-  CSS.highlights.set(THREAD_FIND_ACTIVE_HIGHLIGHT_NAME, new Highlight(...(active ? [active] : [])));
+/** Selection changes touch only the old and new match; layout checks run once per DOM scan. */
+function makeThreadFindHighlightPainter(container: HTMLElement) {
+  let previousRanges: readonly ThreadFindRange[] | null = null;
+  const rangesByRow = new Map<string, Range[]>();
+  const inactive = new Highlight();
+  const active = new Highlight();
+  let previousActive: Range | null = null;
+  CSS.highlights.set(THREAD_FIND_HIGHLIGHT_NAME, inactive);
+  CSS.highlights.set(THREAD_FIND_ACTIVE_HIGHLIGHT_NAME, active);
+  return (
+    ranges: readonly ThreadFindRange[],
+    selection: Pick<
+      Parameters<typeof useThreadFindHighlights>[0],
+      "activeRowId" | "activeOccurrence" | "onActiveRange"
+    >,
+  ) => {
+    if (previousRanges !== ranges) {
+      previousRanges = ranges;
+      previousActive = null;
+      rangesByRow.clear();
+      inactive.clear();
+      for (const match of ranges) {
+        const row = rangesByRow.get(match.rowId) ?? [];
+        row[match.occurrence] = match.range;
+        rangesByRow.set(match.rowId, row);
+        if (foldsHiding(match.range, container).length === 0) inactive.add(match.range);
+      }
+    }
+    if (previousActive && foldsHiding(previousActive, container).length === 0)
+      inactive.add(previousActive);
+    const selected =
+      selection.activeRowId === null
+        ? null
+        : (rangesByRow.get(selection.activeRowId)?.[selection.activeOccurrence] ?? null);
+    active.clear();
+    if (selected) inactive.delete(selected);
+    previousActive = selected;
+    if (selected && revealFolded(selected, container)) {
+      selection.onActiveRange(null);
+    } else {
+      if (selected) active.add(selected);
+      selection.onActiveRange(selected);
+    }
+  };
 }

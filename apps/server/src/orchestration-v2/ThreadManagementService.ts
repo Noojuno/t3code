@@ -275,6 +275,9 @@ export type ThreadManagementError = typeof ThreadManagementError.Type;
 type ThreadManagementFailure = ThreadManagementError | Orchestrator.OrchestratorV2Error;
 
 export interface ThreadManagementServiceShape {
+  readonly searchThreadStream: (
+    input: OrchestrationV2SearchThreadInput,
+  ) => Stream.Stream<OrchestrationV2SearchThreadResult, Orchestrator.OrchestratorV2Error>;
   readonly searchThread: (
     input: OrchestrationV2SearchThreadInput,
   ) => Effect.Effect<OrchestrationV2SearchThreadResult, Orchestrator.OrchestratorV2Error>;
@@ -284,6 +287,7 @@ export interface ThreadManagementServiceShape {
   readonly dispatch: (
     command: OrchestrationV2ServerCommand,
   ) => Effect.Effect<Orchestrator.OrchestratorV2DispatchResult, Orchestrator.OrchestratorV2Error>;
+  readonly getThreadHistoryPage: Orchestrator.OrchestratorV2["Service"]["getThreadHistoryPage"];
   readonly getTimelinePage: Orchestrator.OrchestratorV2["Service"]["getTimelinePage"];
   readonly getMessageCount: Orchestrator.OrchestratorV2["Service"]["getMessageCount"];
   /**
@@ -800,11 +804,23 @@ const make = Effect.gen(function* () {
 
   return ThreadManagementService.of({
     ensureLegacyTranscript,
+    searchThreadStream: (input) =>
+      Stream.unwrap(
+        ensureProjectionTranscript(input.threadId).pipe(
+          Effect.as(orchestrator.searchThreadStream(input)),
+        ),
+      ),
     searchThread: (input) =>
       ensureProjectionTranscript(input.threadId).pipe(
         Effect.andThen(orchestrator.searchThread(input)),
       ),
     dispatch,
+    getThreadHistoryPage: (threadId, cursor, throughEntryId, conversationOnly) =>
+      ensureProjectionTranscript(threadId).pipe(
+        Effect.andThen(
+          orchestrator.getThreadHistoryPage(threadId, cursor, throughEntryId, conversationOnly),
+        ),
+      ),
     getTimelinePage: (threadId, options) =>
       ensureProjectionTranscript(threadId).pipe(
         Effect.andThen(orchestrator.getTimelinePage(threadId, options)),

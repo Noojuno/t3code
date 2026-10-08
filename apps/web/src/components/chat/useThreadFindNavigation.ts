@@ -1,5 +1,5 @@
 import type { LegendListRef } from "@legendapp/list/react";
-import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, type RefObject } from "react";
 import type { ThreadFindMatch } from "./threadFind";
 import { useThreadFindHighlights } from "./threadFindHighlights";
 
@@ -32,13 +32,49 @@ export function useThreadFindNavigation({
         readonly hasMoreHistory: boolean;
         readonly loading: boolean;
         readonly error: string | null;
-        readonly onLoadEarlier: () => void;
+        readonly onLoadEarlier: (throughEntryId?: string) => void;
       }
     | undefined;
 }) {
   const matchKey = match ? `${navigationId}:${query}:${match.entryId}:${match.occurrence}` : null;
   const positionedMatchRef = useRef<string | null>(null);
-  const [positionedMatchKey, setPositionedMatchKey] = useState<string | null>(null);
+  const settledMatchRef = useRef<string | null>(null);
+  const currentMatchKeyRef = useRef(matchKey);
+  const activeRangeRef = useRef<Range | null>(null);
+  const pagingPositionRef = useRef<{ key: string; entries: typeof entries; top: number } | null>(
+    null,
+  );
+  const currentEntriesRef = useRef(entries);
+  useLayoutEffect(() => {
+    currentEntriesRef.current = entries;
+  }, [entries]);
+  useEffect(() => {
+    if (!container) return;
+    const onScroll = () => {
+      const position = pagingPositionRef.current;
+      const range = activeRangeRef.current;
+      if (
+        !position ||
+        position.entries !== currentEntriesRef.current ||
+        !range?.startContainer.isConnected
+      )
+        return;
+      const rect = range.getBoundingClientRect();
+      const viewport = container.getBoundingClientRect();
+      if (rect.bottom < viewport.top || rect.top > viewport.bottom)
+        pagingPositionRef.current = null;
+      else position.top = rect.top;
+    };
+    container.addEventListener("scroll", onScroll, { passive: true });
+    return () => container.removeEventListener("scroll", onScroll);
+  }, [container]);
+  const revealRef = useRef<(range: Range | null) => void>(() => {});
+  useLayoutEffect(() => {
+    currentMatchKeyRef.current = matchKey;
+    return () => {
+      currentMatchKeyRef.current = null;
+    };
+  }, [matchKey]);
   const revealedMatchRef = useRef<string | null>(null);
   const positionedEntriesRef = useRef<typeof entries | null>(null);
   const requestedPagesRef = useRef<{ key: string | null; pages: Set<string> }>({
@@ -60,21 +96,59 @@ export function useThreadFindNavigation({
     const cursor = entries[0]?.id ?? "first";
     if (requestedPagesRef.current.pages.has(cursor)) return;
     requestedPagesRef.current.pages.add(cursor);
-    historyControls.onLoadEarlier();
+
+    historyControls.onLoadEarlier(match.entryId);
   }, [entries, historyControls, listReady, match, matchKey, rowIndex]);
   const reveal = useCallback(
     (range: Range | null) => {
+      activeRangeRef.current = range;
       if (!matchKey) {
         positionedMatchRef.current = null;
+        settledMatchRef.current = null;
         revealedMatchRef.current = null;
+        pagingPositionRef.current = null;
         return;
       }
+      const pagingPosition = pagingPositionRef.current;
+      if (pagingPosition && pagingPosition.key !== matchKey) pagingPositionRef.current = null;
+      if (
+        range?.startContainer.isConnected &&
+        pagingPosition?.key === matchKey &&
+        pagingPosition.entries !== entries
+      ) {
+        const restore = () => {
+          const pinned = pagingPositionRef.current;
+          const currentRange = activeRangeRef.current;
+          if (
+            currentMatchKeyRef.current !== matchKey ||
+            !pinned ||
+            !currentRange?.startContainer.isConnected
+          )
+            return;
+          const delta = currentRange.getBoundingClientRect().top - pinned.top;
+          const scroll = listRef.current?.getState?.().scroll;
+          if (Math.abs(delta) >= 1 && typeof scroll === "number")
+            listRef.current?.scrollToOffset({ offset: scroll + delta, animated: false });
+        };
+        pagingPosition.entries = entries;
+        restore();
+        // The list measures newly inserted activity after the first layout pass.
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => {
+            restore();
+            if (!historyControls?.loading && pagingPositionRef.current === pagingPosition)
+              pagingPositionRef.current = null;
+          }),
+        );
+      }
+      if (historyControls?.error) pagingPositionRef.current = null;
       if (revealedMatchRef.current === matchKey) return;
       if (!listReady || rowIndex < 0) return;
       const materialize = () => {
         const list = listRef.current;
         if (rowIndex < 0 || !list || positionedMatchRef.current === matchKey) return;
         positionedMatchRef.current = matchKey;
+
         void list
           .scrollToIndex({
             index: rowIndex,
@@ -82,9 +156,12 @@ export function useThreadFindNavigation({
             viewOffset: FIND_MATCH_VIEW_MARGIN,
           })
           .then(() => {
-            if (positionedMatchRef.current !== matchKey) return;
+            if (positionedMatchRef.current !== matchKey || currentMatchKeyRef.current !== matchKey)
+              return;
+
             positionedEntriesRef.current = entries;
-            setPositionedMatchKey(matchKey);
+            settledMatchRef.current = matchKey;
+            revealRef.current(activeRangeRef.current);
           });
       };
       if (!range) {
@@ -117,29 +194,48 @@ export function useThreadFindNavigation({
       if (
         Math.abs(delta) >= 1 &&
         positionedEntriesRef.current !== entries &&
-        positionedMatchKey !== matchKey
+        settledMatchRef.current !== matchKey
       ) {
         materialize();
         return;
       }
       const scroll = listRef.current?.getState?.().scroll;
       positionedEntriesRef.current = entries;
+
       revealedMatchRef.current = matchKey;
+      if (historyControls?.loading)
+        pagingPositionRef.current = { key: matchKey, entries, top: rect.top - delta };
       if (Math.abs(delta) >= 1 && typeof scroll === "number") {
         listRef.current?.scrollToOffset({ offset: scroll + delta, animated: false });
+        // Scrolling can mount rows whose measured heights move the selected text again.
+        requestAnimationFrame(() => {
+          if (currentMatchKeyRef.current !== matchKey) return;
+          if (
+            listRef.current?.getState?.().scroll === scroll &&
+            range.getBoundingClientRect().top === rect.top
+          )
+            return;
+          revealedMatchRef.current = null;
+          revealRef.current(activeRangeRef.current);
+        });
       }
     },
     [
       container,
       contentInsetEndAdjustment,
       entries,
+      historyControls?.loading,
+      historyControls?.error,
       listRef,
       listReady,
       matchKey,
-      positionedMatchKey,
       rowIndex,
     ],
   );
+
+  useLayoutEffect(() => {
+    revealRef.current = reveal;
+  }, [reveal]);
 
   useThreadFindHighlights({
     container,

@@ -6,7 +6,9 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { useThreadFindNavigation } from "./useThreadFindNavigation";
 
+const renders = vi.fn();
 function Probe(props: Parameters<typeof useThreadFindNavigation>[0]) {
+  renders();
   useThreadFindNavigation(props);
   return null;
 }
@@ -72,6 +74,111 @@ afterEach(async () => {
 });
 
 describe("find result navigation", () => {
+  it("keeps the highlighted text at the same position when progressive activity arrives", async () => {
+    const historyControls = {
+      hasMoreHistory: true,
+      loading: true,
+      error: null,
+      onLoadEarlier: vi.fn(),
+    };
+    await act(async () => root.render(<Probe {...props} historyControls={historyControls} />));
+    rect = new DOMRect(0, 368, 40, 20);
+    scrollToOffset.mockImplementationOnce(async () => {
+      rect = new DOMRect(0, 200, 40, 20);
+    });
+    await act(async () =>
+      root.render(
+        <Probe
+          {...props}
+          entries={[{ id: "tool" }, { id: "message" }]}
+          historyControls={{ ...historyControls, loading: false }}
+        />,
+      ),
+    );
+    expect(scrollToOffset).toHaveBeenCalledExactlyOnceWith({ offset: 468, animated: false });
+    expect(scrollToIndex).not.toHaveBeenCalled();
+  });
+
+  it("respects scrolling away from a partial match before activity arrives", async () => {
+    const historyControls = {
+      hasMoreHistory: true,
+      loading: true,
+      error: null,
+      onLoadEarlier: vi.fn(),
+    };
+    await act(async () => root.render(<Probe {...props} historyControls={historyControls} />));
+    rect = new DOMRect(0, -600, 40, 20);
+    container.dispatchEvent(new Event("scroll"));
+    await act(async () =>
+      root.render(
+        <Probe
+          {...props}
+          entries={[{ id: "tool" }, { id: "message" }]}
+          historyControls={{ ...historyControls, loading: false }}
+        />,
+      ),
+    );
+    expect(scrollToOffset).not.toHaveBeenCalled();
+  });
+
+  it("reveals settled virtual text without another timeline render", async () => {
+    let complete!: () => void;
+    scrollToIndex.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          complete = resolve;
+        }),
+    );
+    rect = new DOMRect(0, 1800, 40, 20);
+    await act(async () => root.render(<Probe {...props} />));
+    expect(renders).toHaveBeenCalledTimes(1);
+    expect(scrollToOffset).not.toHaveBeenCalled();
+    rect = new DOMRect(0, 450, 40, 20);
+    await act(async () => {
+      complete();
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    });
+    expect(scrollToOffset).toHaveBeenCalledExactlyOnceWith({ offset: 366, animated: false });
+    expect(renders).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores an older scroll completion after navigation moves to another occurrence", async () => {
+    let first!: () => void;
+    let second!: () => void;
+    scrollToIndex
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            first = resolve;
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            second = resolve;
+          }),
+      );
+    rect = new DOMRect(0, 1800, 40, 20);
+    await act(async () => root.render(<Probe {...props} />));
+    await act(async () =>
+      root.render(
+        <Probe
+          {...props}
+          navigationId={1}
+          match={{ entryId: "message", runId: null, occurrence: 1 }}
+        />,
+      ),
+    );
+    rect = new DOMRect(0, 450, 40, 20);
+    await act(async () => first());
+    expect(scrollToOffset).not.toHaveBeenCalled();
+    await act(async () => {
+      second();
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    });
+    expect(scrollToOffset).toHaveBeenCalledExactlyOnceWith({ offset: 366, animated: false });
+  });
+
   it("loads history until a distant match can be revealed in the conversation", async () => {
     const onLoadEarlier = vi.fn();
     const historyControls = { hasMoreHistory: true, loading: false, error: null, onLoadEarlier };
@@ -128,6 +235,22 @@ describe("find result navigation", () => {
     expect(ranges[0]?.toString()).toBe("COD4");
   });
 
+  it("reveals the same match again when search restarts after scrolling away", async () => {
+    await act(async () => root.render(<Probe {...props} />));
+    rect = new DOMRect(0, -1800, 40, 20);
+    props.listRef.current = {
+      scrollToIndex,
+      scrollToOffset,
+      getState: () => ({ scroll: 2400 }),
+    } as unknown as LegendListRef;
+    await act(async () => root.render(<Probe {...props} navigationId={1} />));
+    expect(scrollToOffset).toHaveBeenCalledExactlyOnceWith({ offset: 504, animated: false });
+    expect(scrollToIndex).not.toHaveBeenCalled();
+    expect(
+      Array.from(CSS.highlights.get("t3-thread-find-active") ?? [], (range) => range.toString()),
+    ).toEqual(["COD4"]);
+  });
+
   it("moves only far enough to reveal text below the composer", async () => {
     await act(async () => root.render(<Probe {...props} />));
     rect = new DOMRect(0, 450, 40, 20);
@@ -160,12 +283,57 @@ describe("find result navigation", () => {
     expect(scrollToOffset).toHaveBeenCalledExactlyOnceWith({ offset: 244, animated: false });
   });
 
+  it("keeps the selected text visible when newly measured rows shift during scrolling", async () => {
+    let scroll = 300;
+    props.listRef.current = {
+      scrollToIndex,
+      scrollToOffset,
+      getState: () => ({ scroll }),
+    } as unknown as LegendListRef;
+    scrollToOffset
+      .mockImplementationOnce(async ({ offset }) => {
+        scroll = offset;
+        // Newly mounted row measurements offset the first scroll movement.
+      })
+      .mockImplementationOnce(async ({ offset }) => {
+        scroll = offset;
+        rect = new DOMRect(0, 200, 40, 20);
+      });
+    await act(async () => root.render(<Probe {...props} />));
+    rect = new DOMRect(0, 450, 40, 20);
+    await act(async () =>
+      root.render(
+        <Probe
+          {...props}
+          navigationId={1}
+          match={{ entryId: "message", runId: null, occurrence: 1 }}
+        />,
+      ),
+    );
+    await act(async () => {
+      await new Promise<void>((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+      );
+    });
+    expect(rect.top).toBe(200);
+    expect(scrollToOffset.mock.calls).toEqual([
+      [{ offset: 366, animated: false }],
+      [{ offset: 432, animated: false }],
+    ]);
+    expect(renders).toHaveBeenCalledTimes(2);
+  });
+
   it("waits for a new context window to settle before revealing an offscreen result", async () => {
     rect = new DOMRect(0, 1800, 40, 20);
     scrollToIndex.mockImplementationOnce(async () => {
       rect = new DOMRect(0, 450, 40, 20);
     });
-    await act(async () => root.render(<Probe {...props} />));
+    await act(async () => {
+      root.render(<Probe {...props} />);
+    });
+    await act(async () => {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    });
     expect(scrollToIndex).toHaveBeenCalledTimes(1);
     expect(scrollToOffset).toHaveBeenCalledExactlyOnceWith({ offset: 366, animated: false });
   });

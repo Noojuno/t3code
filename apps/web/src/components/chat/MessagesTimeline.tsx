@@ -1,3 +1,4 @@
+import { ThreadFindTimelineContext } from "./ThreadFindProvider";
 import { shouldPreserveAssistantLineBreaks } from "@t3tools/shared/markdownPipeline";
 import { MarkdownFindContext, useFindRevealRef } from "./markdownFindContext";
 import { ComputerUseAppIcon } from "~/components/Icons";
@@ -72,6 +73,7 @@ import {
   memo,
   use,
   useCallback,
+  useContext,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -210,7 +212,6 @@ import {
   resolveTimelineMinimapTopPercent,
   resolveWorkGroupScrollIndex,
   shouldFollowWorkGroupAppend,
-  timelineEntryTurnFoldRunId,
   timelineTurnFoldRunIdsByEntryId,
   threadReadLabelPrefix,
   threadReadTargetId,
@@ -441,7 +442,7 @@ export interface MessagesTimelineHistoryControls {
   readonly hasMoreHistory: boolean;
   readonly loading: boolean;
   readonly error: string | null;
-  readonly onLoadEarlier: () => void;
+  readonly onLoadEarlier: (throughEntryId?: string) => void;
 }
 
 interface MessagesTimelineProps {
@@ -546,14 +547,17 @@ interface MessagesTimelineProps {
 // ---------------------------------------------------------------------------
 
 export function MessagesTimeline(props: MessagesTimelineProps) {
-  const { findOpen, onManualNavigation } = props;
+  const find = useContext(ThreadFindTimelineContext);
+  const findOpen = find?.findOpen ?? props.findOpen;
+  const { onManualNavigation } = props;
   useEffect(() => {
     if (findOpen) onManualNavigation();
   }, [findOpen, onManualNavigation]);
   return (
     <ConversationTimeline
       {...props}
-      liveFollowEnabled={!props.findOpen && props.liveFollowEnabled}
+      {...find}
+      liveFollowEnabled={!findOpen && props.liveFollowEnabled}
     />
   );
 }
@@ -821,17 +825,22 @@ const ConversationTimeline = memo(function ConversationTimeline({
 
   // Find the fold that hides the match: imported turns have no run id but still
   // fold under a synthetic key, so the match's own run id cannot open them.
-  const activeFindEntryId = activeFindMatch?.entryId;
-  const activeFindRunId = useMemo(
+  const findFoldRunIds = useMemo(
     () =>
-      activeFindEntryId === undefined
-        ? undefined
-        : (timelineEntryTurnFoldRunId(
-            { timelineEntries, latestRun, runningRunId, isWorking, runlessWorkActive },
-            activeFindEntryId,
-          ) ?? undefined),
-    [activeFindEntryId, timelineEntries, latestRun, runningRunId, isWorking, runlessWorkActive],
+      findActive
+        ? timelineTurnFoldRunIdsByEntryId({
+            timelineEntries,
+            latestRun,
+            runningRunId,
+            isWorking,
+            runlessWorkActive,
+          })
+        : null,
+    [findActive, timelineEntries, latestRun, runningRunId, isWorking, runlessWorkActive],
   );
+  const activeFindRunId = activeFindMatch
+    ? findFoldRunIds?.get(activeFindMatch.entryId)
+    : undefined;
   useEffect(() => {
     if (!activeFindRunId) return;
     setExpandedRunIds((previous) =>
@@ -856,7 +865,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
   }, [activeFindAttemptId]);
   const visibleExpandedAttemptIds = useMemo(
     () =>
-      activeFindAttemptId
+      activeFindAttemptId && !paintedExpandedAttemptIds.has(activeFindAttemptId)
         ? new Set(paintedExpandedAttemptIds).add(activeFindAttemptId)
         : paintedExpandedAttemptIds,
     [activeFindAttemptId, paintedExpandedAttemptIds],
@@ -1440,13 +1449,15 @@ const ConversationTimeline = memo(function ConversationTimeline({
     if (!findPositionReaderRef || !timelineViewportElement) return;
     const read: ThreadFindPositionReader = (query) => {
       // Imported turns fold under a synthetic key, so match folds by key, not run id.
-      const foldRunIds = timelineTurnFoldRunIdsByEntryId({
-        timelineEntries,
-        latestRun,
-        runningRunId,
-        isWorking,
-        runlessWorkActive,
-      });
+      const foldRunIds =
+        findFoldRunIds ??
+        timelineTurnFoldRunIdsByEntryId({
+          timelineEntries,
+          latestRun,
+          runningRunId,
+          isWorking,
+          runlessWorkActive,
+        });
       const entryById = new Map(timelineEntries.map((entry) => [entry.id, entry]));
       return readThreadFindPosition(
         timelineViewportElement,
@@ -1490,6 +1501,7 @@ const ConversationTimeline = memo(function ConversationTimeline({
     };
   }, [
     contentInsetEndAdjustment,
+    findFoldRunIds,
     findPositionReaderRef,
     isWorking,
     latestRun,
@@ -1644,7 +1656,7 @@ function TimelineHistoryControl(props: MessagesTimelineHistoryControls) {
             type="button"
             disabled={props.loading}
             aria-label="Load earlier turns"
-            onClick={props.onLoadEarlier}
+            onClick={() => props.onLoadEarlier()}
             className="w-full py-1.5 text-xs text-muted-foreground/60 hover:text-foreground disabled:cursor-default"
           >
             {props.loading ? "Loading earlier turns…" : "Load earlier turns"}

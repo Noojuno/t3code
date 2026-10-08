@@ -3138,6 +3138,7 @@ export const ORCHESTRATION_V2_WS_METHODS = {
   getFullThreadDiff: "orchestration.getFullThreadDiff",
   searchThreads: "orchestration.searchThreads",
   searchThread: "orchestration.searchThread",
+  searchThreadStream: "orchestration.searchThreadStream",
   getArchivedShellSnapshot: "orchestration.getArchivedShellSnapshot",
   getThreadProjection: "orchestration.getThreadProjection",
   getWorkflowScript: "orchestration.getWorkflowScript",
@@ -3512,10 +3513,23 @@ export const OrchestrationV2ThreadFindMatch = Schema.Struct({
   occurrence: NonNegativeInt,
 });
 export const OrchestrationV2SearchThreadResult = Schema.Struct({
+  // Omitted by older servers. An early match has no final ordinal or total yet.
+  complete: Schema.optionalKey(Schema.Boolean),
   snapshotSequence: NonNegativeInt,
   totalMatches: NonNegativeInt,
   activeIndex: NonNegativeInt,
   match: Schema.NullOr(OrchestrationV2ThreadFindMatch),
+  // Counts and identities around the selection let clients step without another round trip.
+  navigation: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({
+        entryId: TrimmedNonEmptyString,
+        runId: Schema.NullOr(RunId),
+        startIndex: NonNegativeInt,
+        count: NonNegativeInt,
+      }),
+    ).check(Schema.isMaxLength(17)),
+  ),
 });
 export type OrchestrationV2SearchThreadResult = typeof OrchestrationV2SearchThreadResult.Type;
 
