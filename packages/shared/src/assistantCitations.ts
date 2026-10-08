@@ -50,12 +50,6 @@ export function formatAssistantCitationHref(citation: AssistantCitation): string
   return `${CITATION_HREF_PREFIX}${path}?${query}`;
 }
 
-/** Visible chip text: the comment, else the quoted text, collapsed and capped. */
-export function assistantCitationLabel(citation: AssistantCitation): string {
-  const preview = (citation.comment?.trim() || citation.text).replace(/\s+/g, " ");
-  return preview.length > 64 ? `${preview.slice(0, 64)}…` : preview;
-}
-
 export function parseAssistantCitationHref(href: string): AssistantCitation | null {
   if (!href.startsWith(CITATION_HREF_PREFIX) || href.length > MAX_CITATION_HREF_LENGTH) {
     return null;
@@ -102,6 +96,12 @@ export function parseAssistantCitationHref(href: string): AssistantCitation | nu
   } catch {
     return null;
   }
+}
+
+/** Visible chip text: the comment, else the quoted text, collapsed and capped. */
+export function assistantCitationLabel(citation: AssistantCitation): string {
+  const preview = (citation.comment?.trim() || citation.text).replace(/\s+/g, " ");
+  return preview.length > 64 ? `${preview.slice(0, 64)}…` : preview;
 }
 
 export function serializeAssistantCitation(citation: AssistantCitation): string {
