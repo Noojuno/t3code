@@ -74,6 +74,40 @@ afterEach(async () => {
 });
 
 describe("find result navigation", () => {
+  it("retargets a pending first jump when progressive history moves the matching row", async () => {
+    container.replaceChildren();
+    let first!: () => void;
+    let second!: () => void;
+    scrollToIndex
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            first = resolve;
+          }),
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise<void>((resolve) => {
+            second = resolve;
+          }),
+      );
+    await act(async () => root.render(<Probe {...props} rowIndex={2} />));
+    await act(async () =>
+      root.render(<Probe {...props} rowIndex={6} entries={[{ id: "tool" }, ...props.entries]} />),
+    );
+    expect(scrollToIndex.mock.calls.map(([request]) => request.index)).toEqual([2, 6]);
+    await act(async () => first());
+    expect(scrollToOffset).not.toHaveBeenCalled();
+    await act(async () => {
+      container.innerHTML =
+        '<div data-timeline-row-id="message"><p data-thread-find-text>COD4</p></div>';
+      rect = new DOMRect(0, 450, 40, 20);
+      second();
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    });
+    expect(scrollToOffset).toHaveBeenCalledExactlyOnceWith({ offset: 366, animated: false });
+  });
+
   it("keeps the highlighted text at the same position when progressive activity arrives", async () => {
     const historyControls = {
       hasMoreHistory: true,

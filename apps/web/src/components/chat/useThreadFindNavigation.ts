@@ -37,7 +37,11 @@ export function useThreadFindNavigation({
     | undefined;
 }) {
   const matchKey = match ? `${navigationId}:${query}:${match.entryId}:${match.occurrence}` : null;
-  const positionedMatchRef = useRef<string | null>(null);
+  const positioningRef = useRef<{
+    key: string;
+    rowIndex: number;
+    entries: typeof entries;
+  } | null>(null);
   const settledMatchRef = useRef<string | null>(null);
   const currentMatchKeyRef = useRef(matchKey);
   const activeRangeRef = useRef<Range | null>(null);
@@ -103,7 +107,7 @@ export function useThreadFindNavigation({
     (range: Range | null) => {
       activeRangeRef.current = range;
       if (!matchKey) {
-        positionedMatchRef.current = null;
+        positioningRef.current = null;
         settledMatchRef.current = null;
         revealedMatchRef.current = null;
         pagingPositionRef.current = null;
@@ -146,8 +150,18 @@ export function useThreadFindNavigation({
       if (!listReady || rowIndex < 0) return;
       const materialize = () => {
         const list = listRef.current;
-        if (rowIndex < 0 || !list || positionedMatchRef.current === matchKey) return;
-        positionedMatchRef.current = matchKey;
+        const previous = positioningRef.current;
+        if (
+          !list ||
+          (previous?.key === matchKey &&
+            previous.rowIndex === rowIndex &&
+            previous.entries === entries)
+        )
+          return;
+        // Activity can insert rows while LegendList waits for layout. Retarget the
+        // pending jump instead of treating the first requested index as final.
+        const request = { key: matchKey, rowIndex, entries };
+        positioningRef.current = request;
 
         void list
           .scrollToIndex({
@@ -156,7 +170,7 @@ export function useThreadFindNavigation({
             viewOffset: FIND_MATCH_VIEW_MARGIN,
           })
           .then(() => {
-            if (positionedMatchRef.current !== matchKey || currentMatchKeyRef.current !== matchKey)
+            if (positioningRef.current !== request || currentMatchKeyRef.current !== matchKey)
               return;
 
             positionedEntriesRef.current = entries;
