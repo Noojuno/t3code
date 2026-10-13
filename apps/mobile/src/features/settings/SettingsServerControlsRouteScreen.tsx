@@ -3,7 +3,7 @@ import { SettingsRow } from "./components/SettingsRow";
 import { AuthSettingsWriteScope } from "@t3tools/contracts";
 import { readEnvironmentScope, useEnvironmentsWithScope } from "../../state/session";
 import { ScreenScrollView as ScrollView } from "../../components/ScreenScrollView";
-import { AppText as Text } from "../../components/AppText";
+import { AppText as Text, AppTextInput } from "../../components/AppText";
 import {
   type ResponseStreamingMode,
   type ServerSettings,
@@ -42,7 +42,7 @@ import {
 type SettingsPage = "new-threads" | "source-control" | "agent-behavior" | "maintenance";
 
 const PAGE_TITLES: Record<SettingsPage, string> = {
-  "new-threads": "New threads",
+  "new-threads": "New projects & threads",
   "source-control": "Source control",
   "agent-behavior": "Agent behavior",
   maintenance: "Maintenance",
@@ -151,6 +151,7 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
   );
   const [pendingWrites, setPendingWrites] = useState(0);
   const writeInFlight = useRef(false);
+  const directoryEdited = useRef(false);
   const [pendingTargets, setPendingTargets] = useState<
     readonly ScopedMobileSettingsTarget[] | null
   >(null);
@@ -273,6 +274,41 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
               ) : null}
               {props.page === "new-threads" ? (
                 <>
+                  {!projectSelected ? (
+                    <SettingsSection title="New projects directory">
+                      <View className="gap-2 px-4 py-3">
+                        <Text className="text-sm text-foreground-muted">
+                          Folder on the selected environment for new projects. Leave empty to use
+                          the projects folder in its T3 data directory. Existing projects stay where
+                          they are.
+                        </Text>
+                        <AppTextInput
+                          key={`${targets.map((target) => target.environment.environmentId).join(",")}:${uniform("newProjectBaseDirectory")}`}
+                          accessibilityLabel="New projects directory"
+                          defaultValue={uniform("newProjectBaseDirectory") ?? ""}
+                          placeholder={isMixed("newProjectBaseDirectory") ? "Mixed" : "Default"}
+                          editable={!disabled}
+                          autoCapitalize="none"
+                          autoCorrect={false}
+                          className="min-h-10 rounded-xl px-3 py-2 text-base text-foreground"
+                          onChangeText={() => {
+                            directoryEdited.current = true;
+                          }}
+                          onEndEditing={(event) => {
+                            const value = event.nativeEvent.text.trim();
+                            if (
+                              !disabled &&
+                              directoryEdited.current &&
+                              value !== uniform("newProjectBaseDirectory")
+                            ) {
+                              write({ newProjectBaseDirectory: value });
+                            }
+                            directoryEdited.current = false;
+                          }}
+                        />
+                      </View>
+                    </SettingsSection>
+                  ) : null}
                   <SettingsSection
                     title="Default workspace"
                     trailing={
