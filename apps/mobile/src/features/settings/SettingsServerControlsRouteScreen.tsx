@@ -26,6 +26,7 @@ import {
   SettingsEnvironmentFilterHeader,
 } from "./components/SettingsEnvironmentFilterHeader";
 import { BranchNamingSettings } from "./components/BranchNamingSettings";
+import { SettingsActionRow } from "./components/SettingsActionRow";
 import { SettingsChoiceRow } from "./components/SettingsChoiceRow";
 import { SettingsSection } from "./components/SettingsSection";
 import { SettingsSwitchRow } from "./components/SettingsSwitchRow";
@@ -307,6 +308,14 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
                           }}
                         />
                       </View>
+                      {uniform("newProjectBaseDirectory") !== "" ? (
+                        <SettingsActionRow
+                          icon="arrow.clockwise"
+                          label="Use default directory"
+                          disabled={disabled}
+                          onPress={() => write({ newProjectBaseDirectory: "" })}
+                        />
+                      ) : null}
                     </SettingsSection>
                   ) : null}
                   <SettingsSection

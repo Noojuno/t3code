@@ -527,6 +527,7 @@ export function useSettingsRestore(onRestored?: () => void) {
     themeHalves,
   } = useTheme();
   const settings = useScopedSettings();
+  const mixedNewProjectBaseDirectory = useScopedSettingsMixed(["newProjectBaseDirectory"]);
   const updateSettings = useUpdateScopedSettings();
 
   const isTextGenerationModelDirty = !Equal.equals(
@@ -642,7 +643,8 @@ export function useSettingsRestore(onRestored?: () => void) {
       DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin
         ? ["New worktrees start from origin"]
         : []),
-      ...(settings.newProjectBaseDirectory !== DEFAULT_UNIFIED_SETTINGS.newProjectBaseDirectory
+      ...(mixedNewProjectBaseDirectory ||
+      settings.newProjectBaseDirectory !== DEFAULT_UNIFIED_SETTINGS.newProjectBaseDirectory
         ? ["New projects directory"]
         : []),
       ...(settings.addProjectBaseDirectory !== DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory
@@ -667,6 +669,7 @@ export function useSettingsRestore(onRestored?: () => void) {
     [
       isTextGenerationModelDirty,
       isBackgroundActivityDirty,
+      mixedNewProjectBaseDirectory,
       settings.browserDefaultViewport,
       settings.browserDefaultZoomFactor,
       settings.browserDefaultAppearance,
@@ -3090,8 +3093,9 @@ export function GeneralSettingsPanel() {
           {...searchableSetting("new-projects-directory")}
           description="Folder on this environment for new projects. Leave empty to use the projects folder in its T3 data directory. Existing projects stay where they are."
           resetAction={
+            mixedNewProjectBaseDirectory ||
             settings.newProjectBaseDirectory !==
-            DEFAULT_UNIFIED_SETTINGS.newProjectBaseDirectory ? (
+              DEFAULT_UNIFIED_SETTINGS.newProjectBaseDirectory ? (
               <SettingResetButton
                 label="new projects directory"
                 onClick={() =>
