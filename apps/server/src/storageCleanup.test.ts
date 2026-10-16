@@ -1398,7 +1398,7 @@ describe("storage cleanup reports and local file policies", () => {
   it.live("keeps Rift workspaces that would otherwise be removed", () =>
     runCleanupTest(
       Effect.gen(function* () {
-        const { service, fs, worktree } = yield* cleanupFixture;
+        const { service, fs, worktree } = yield* cleanupFixture();
         yield* fs.writeFileString(`${worktree}/.rift`, "01M51C1KKPDGEAT2PB1V7SPN1V\n");
         expect((yield* service.runNow).entries[0]).toMatchObject({
           outcome: "kept",

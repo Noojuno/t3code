@@ -668,11 +668,14 @@ effectIt.effect.each(["cleanup-first", "startup-first"])(
       yield* Fiber.join(startup);
       if (laterCleanup !== undefined) yield* Fiber.join(laterCleanup);
       if (order === "cleanup-first") {
-        expect(harness.createWorktree).toHaveBeenCalledWith({
-          cwd: "/tmp/native-account-project",
-          refName: "feature/restore",
-          path: worktreePath,
-        });
+        expect(harness.createWorktree).toHaveBeenCalledWith(
+          {
+            cwd: "/tmp/native-account-project",
+            refName: "feature/restore",
+            path: worktreePath,
+          },
+          { backend: "git" },
+        );
       }
       expect(harness.resolveRuntimePolicy).toHaveBeenCalledWith(
         expect.objectContaining({
