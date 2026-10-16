@@ -430,7 +430,7 @@ function WorktreeBackendRow() {
   return (
     <SettingsRow
       {...searchableSetting("storage-worktree-backend")}
-      description="How new worktrees are created. Rift makes copy-on-write snapshots with their own branches, which automatic cleanup skips. Install Rift v0.0.13 on this machine; T3 Code initializes each project automatically."
+      description="Rift creates independent copy-on-write snapshots. Install it on the server first. Automatic cleanup keeps Rift worktrees."
       serverScoped
       settingKeys={["worktreeBackend"]}
       mixed={mixed}

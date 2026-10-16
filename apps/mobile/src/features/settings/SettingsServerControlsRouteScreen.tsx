@@ -94,7 +94,7 @@ const BACKEND_CHOICES: ReadonlyArray<{
     mode: "rift",
     label: "Rift",
     description:
-      "Copy-on-write snapshots with their own branches, skipped by automatic cleanup. Install Rift v0.0.13 on the server; T3 Code initializes each project automatically.",
+      "Rift creates independent copy-on-write snapshots. Install it on the server first. Automatic cleanup keeps Rift worktrees.",
   },
 ];
 
