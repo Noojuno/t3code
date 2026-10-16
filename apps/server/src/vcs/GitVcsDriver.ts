@@ -30,6 +30,7 @@ import {
   type VcsRemoveWorktreeInput,
   type VcsStatusInput,
   type VcsStatusResult,
+  type WorktreeBackend,
   type WorktreeSubmodules,
 } from "@t3tools/contracts";
 import {
@@ -158,6 +159,8 @@ export interface CreateWorktreeOptions {
   readonly submodules?: WorktreeSubmodules | null;
   /** The `worktreesDirectory` setting, used when the input has no explicit path. */
   readonly worktreesDirectory?: string;
+  /** The `worktreeBackend` setting. Omitted creates a Git worktree. */
+  readonly backend?: WorktreeBackend;
 }
 
 export interface GitCommitProgress {

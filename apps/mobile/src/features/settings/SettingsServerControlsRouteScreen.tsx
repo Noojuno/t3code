@@ -9,6 +9,7 @@ import {
   type ServerSettings,
   type ServerSettingsPatch,
   type ThreadEnvMode,
+  type WorktreeBackend,
   type WorktreeSubmodules,
   PROJECT_SCOPED_SERVER_SETTING_KEYS,
   type ProjectScopedServerSettingKey,
@@ -81,6 +82,20 @@ const SUBMODULE_CHOICES: ReadonlyArray<{
     description: "Skip submodules declared inside other submodules.",
   },
   { mode: "none", label: "Skip", description: "Leave submodules empty for a setup script." },
+];
+
+const BACKEND_CHOICES: ReadonlyArray<{
+  readonly mode: WorktreeBackend;
+  readonly label: string;
+  readonly description: string;
+}> = [
+  { mode: "git", label: "Git", description: "Create linked Git worktrees." },
+  {
+    mode: "rift",
+    label: "Rift",
+    description:
+      "Copy-on-write snapshots with their own branches, skipped by automatic cleanup. Install Rift v0.0.13 on the server; T3 Code initializes each project automatically.",
+  },
 ];
 
 const WORKSPACE_CHOICES: ReadonlyArray<{
@@ -227,6 +242,11 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
     pendingWrites > 0 ||
     !hasConnectedSelection ||
     (projectSelected && !supportsProjectOverrides);
+  const showsWorktreeBackend =
+    !projectSelected &&
+    targets.every(
+      (target) => target.environment.serverConfig.environment.capabilities.riftWorktrees === true,
+    );
   const supportsContinuation = targets.every(
     (target) =>
       target.environment.serverConfig.environment.capabilities.threadRestartContinuation === true,
@@ -324,6 +344,31 @@ function ServerSettingsDetail(props: { readonly page: SettingsPage }) {
                       />
                     ))}
                   </SettingsSection>
+                  {showsWorktreeBackend ? (
+                    <SettingsSection
+                      title="Worktree backend"
+                      trailing={
+                        pendingWrites === 0 && isMixed("worktreeBackend") ? (
+                          <MixedValuesLabel projectSelected={projectSelected} />
+                        ) : null
+                      }
+                    >
+                      {BACKEND_CHOICES.map((choice, index) => (
+                        <SettingsChoiceRow
+                          key={choice.mode}
+                          label={choice.label}
+                          description={choice.description}
+                          selected={
+                            !isMixed("worktreeBackend") &&
+                            uniform("worktreeBackend") === choice.mode
+                          }
+                          separated={index > 0}
+                          disabled={disabledFor("worktreeBackend")}
+                          onPress={() => write({ worktreeBackend: choice.mode })}
+                        />
+                      ))}
+                    </SettingsSection>
+                  ) : null}
                   <SettingsSection
                     title="Default permissions"
                     trailing={

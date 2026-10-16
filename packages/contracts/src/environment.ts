@@ -67,6 +67,13 @@ export type ThreadEnvMode = typeof ThreadEnvMode.Type;
  */
 export const WorktreeSubmodules = Schema.Literals(["recursive", "top-level", "none"]);
 export type WorktreeSubmodules = typeof WorktreeSubmodules.Type;
+
+/**
+ * What creates new worktrees: `git worktree add`, or a Rift copy-on-write
+ * snapshot that becomes an independent repository.
+ */
+export const WorktreeBackend = Schema.Literals(["git", "rift"]);
+export type WorktreeBackend = typeof WorktreeBackend.Type;
 export type ExecutionEnvironmentPlatform = typeof ExecutionEnvironmentPlatform.Type;
 
 /** How a server can replace itself with another version when asked over RPC.
@@ -136,6 +143,8 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   worktreesDirectory: Schema.optionalKey(Schema.Boolean),
   /** Server can exclude PR-linked threads from inactivity settlement. */
   threadAutoSettlementScope: Schema.optionalKey(Schema.Boolean),
+  /** Server can create new worktrees with Rift through the `worktreeBackend` setting. */
+  riftWorktrees: Schema.optionalKey(Schema.Boolean),
   /** Server persists the opt-in for continuing interrupted threads after restarts. */
   threadRestartContinuation: Schema.optionalKey(Schema.Boolean),
   /** Server resolves `projectSettingsOverrides`; older servers ignore the key. */

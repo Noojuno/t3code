@@ -285,15 +285,18 @@ const make = Effect.gen(function* () {
         // suspend: build the rollback only if cleanup actually runs. Removing
         // the worktree must succeed before deleting its freshly created branch;
         // otherwise the branch may still be checked out there.
+        const createdSourceBranch = worktree.createdSourceBranch;
         const removeCreatedWorktree = Effect.suspend(() =>
           gitWorkflow.removeWorktree({ cwd: projectCwd, path: worktreePath, force: true }).pipe(
             Effect.andThen(
               Effect.suspend(() =>
-                gitWorkflow.deleteLocalBranch({
-                  cwd: projectCwd,
-                  refName: worktree.worktree.refName,
-                  force: true,
-                }),
+                createdSourceBranch === null
+                  ? Effect.void
+                  : gitWorkflow.deleteLocalBranch({
+                      cwd: projectCwd,
+                      refName: createdSourceBranch,
+                      force: true,
+                    }),
               ),
             ),
           ),
