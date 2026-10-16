@@ -430,7 +430,13 @@ function WorktreeBackendRow() {
   return (
     <SettingsRow
       {...searchableSetting("storage-worktree-backend")}
-      description="Rift creates independent copy-on-write snapshots. Install it on the server first. Automatic cleanup keeps Rift worktrees."
+      description={
+        mixed
+          ? "Choose how new worktrees are created."
+          : settings.worktreeBackend === "rift"
+            ? "Rift creates independent copy-on-write snapshots. Install it on the server first. Automatic cleanup keeps Rift worktrees."
+            : "Git worktrees share the project's repository and branches."
+      }
       serverScoped
       settingKeys={["worktreeBackend"]}
       mixed={mixed}
