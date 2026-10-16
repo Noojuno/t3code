@@ -75,9 +75,6 @@ const FAILURE_DETAILS: Readonly<Record<string, string>> = {
   marker_mismatch: "The folder's Rift marker does not match Rift's registry.",
 };
 
-export const riftError = (operation: string, cwd: string, detail: string) =>
-  new GitCommandError({ operation, command: "rift", cwd, detail });
-
 export const RIFT_REMOVED_WORKSPACE_OPERATION = "GitVcsDriver.createWorktree.removedRiftWorkspace";
 
 const isGitCommandError = Schema.is(GitCommandError);
@@ -91,13 +88,18 @@ const receiptFileFor = Effect.fn("RiftWorktrees.receiptFileFor")(function* (dest
   const crypto = yield* Crypto.Crypto;
   const path = yield* Path.Path;
   const { stateDir } = yield* ServerConfig.ServerConfig;
-  const digest = yield* crypto
-    .digest("SHA-256", new TextEncoder().encode(destination))
-    .pipe(
-      Effect.mapError(() =>
-        riftError("RiftWorktrees.receipt", destination, "Could not name the Rift receipt."),
-      ),
-    );
+  const digest = yield* crypto.digest("SHA-256", new TextEncoder().encode(destination)).pipe(
+    Effect.mapError(
+      (cause) =>
+        new GitCommandError({
+          operation: "RiftWorktrees.receipt",
+          command: "rift",
+          cwd: destination,
+          detail: "Could not name the Rift receipt.",
+          cause,
+        }),
+    ),
+  );
   return path.join(stateDir, RECEIPTS_DIRECTORY, `${Hex.encode(digest)}.json`);
 });
 
@@ -152,36 +154,55 @@ export const makeRiftWorktrees = Effect.fn("makeRiftWorktrees")(function* (
           maxOutputBytes: 1_000_000,
         })
         .pipe(
-          Effect.mapError((error) =>
-            riftError(
-              operation,
-              cwd,
-              error._tag === "ProcessSpawnError"
-                ? "Rift is not installed on this machine. Install Rift v0.0.13 so `rift` is on the server's PATH, or switch Settings → Storage → Worktree backend to Git."
-                : error._tag === "ProcessTimeoutError"
-                  ? "Rift did not finish in time."
-                  : "Rift did not respond.",
-            ),
+          Effect.mapError(
+            (error) =>
+              new GitCommandError({
+                operation,
+                command: "rift",
+                cwd,
+                detail:
+                  error._tag === "ProcessSpawnError"
+                    ? "Rift is not installed on this machine. Install Rift v0.0.13 so `rift` is on the server's PATH, or switch Settings → Storage → Worktree backend to Git."
+                    : error._tag === "ProcessTimeoutError"
+                      ? "Rift did not finish in time."
+                      : "Rift did not respond.",
+                cause: error,
+              }),
           ),
         );
-      const unexpected = riftError(
-        operation,
-        cwd,
-        "Rift returned an unexpected response. T3 Code supports Rift v0.0.13.",
-      );
       const response = yield* decodeRiftResponse(output.stdout.trim()).pipe(
-        Effect.mapError(() => unexpected),
+        Effect.mapError(
+          (cause) =>
+            new GitCommandError({
+              operation,
+              command: "rift",
+              cwd,
+              detail: "Rift returned an unexpected response. T3 Code supports Rift v0.0.13.",
+              cause,
+            }),
+        ),
       );
       if (response.status === "error") {
         const code = RIFT_CODE_PATTERN.test(response.error.code) ? response.error.code : "unknown";
-        return yield* riftError(
+        return yield* new GitCommandError({
           operation,
+          command: "rift",
           cwd,
-          FAILURE_DETAILS[code] ?? `Rift ${String(request.command)} failed (${code}).`,
-        );
+          detail: FAILURE_DETAILS[code] ?? `Rift ${String(request.command)} failed (${code}).`,
+          cause: response.error,
+        });
       }
       return yield* Schema.decodeUnknownEffect(value)(response.value).pipe(
-        Effect.mapError(() => unexpected),
+        Effect.mapError(
+          (cause) =>
+            new GitCommandError({
+              operation,
+              command: "rift",
+              cwd,
+              detail: "Rift returned an unexpected response. T3 Code supports Rift v0.0.13.",
+              cause,
+            }),
+        ),
       );
     });
 
@@ -233,12 +254,15 @@ export const makeRiftWorktrees = Effect.fn("makeRiftWorktrees")(function* (
       yield* fileSystem.writeFileString(temporary, encodeReceipt(receipt));
       yield* fileSystem.rename(temporary, file);
     }).pipe(
-      Effect.mapError(() =>
-        riftError(
-          "RiftWorktrees.writeReceipt",
-          receipt.destination,
-          "Could not record the new Rift workspace.",
-        ),
+      Effect.mapError(
+        (cause) =>
+          new GitCommandError({
+            operation: "RiftWorktrees.writeReceipt",
+            command: "rift",
+            cwd: receipt.destination,
+            detail: "Could not record the new Rift workspace.",
+            cause,
+          }),
       ),
     );
     index.set(receipt.destination, receipt);
@@ -307,7 +331,6 @@ export const makeRiftWorktrees = Effect.fn("makeRiftWorktrees")(function* (
     readonly onClaimed?: ((path: string) => Effect.Effect<void, never>) | undefined;
   }) {
     const operation = "GitVcsDriver.createWorktree.rift";
-    const fail = (detail: string) => riftError(operation, input.sourceRoot, detail);
     return yield* Effect.uninterruptible(
       Effect.gen(function* () {
         const created = yield* Effect.forkDetach(
@@ -340,9 +363,12 @@ export const makeRiftWorktrees = Effect.fn("makeRiftWorktrees")(function* (
           ),
         ).pipe(Effect.flatMap(Fiber.join));
         if (created !== input.destination) {
-          return yield* fail(
-            `Rift returned an unexpected workspace path. Check ${input.destination} and Rift's workspace list before trying again; no workspace was removed.`,
-          );
+          return yield* new GitCommandError({
+            operation,
+            command: "rift",
+            cwd: input.sourceRoot,
+            detail: `Rift returned an unexpected workspace path. Check ${input.destination} and Rift's workspace list before trying again; no workspace was removed.`,
+          });
         }
         const riftId = yield* readMarker(input.destination);
         const ancestors = yield* rpc(
@@ -353,9 +379,12 @@ export const makeRiftWorktrees = Effect.fn("makeRiftWorktrees")(function* (
           RIFT_QUERY_TIMEOUT_MS,
         );
         if (!RIFT_ID_PATTERN.test(riftId) || ancestors[0] !== input.sourceRoot) {
-          return yield* fail(
-            `Rift's new workspace could not be verified; it was left at ${input.destination}.`,
-          );
+          return yield* new GitCommandError({
+            operation,
+            command: "rift",
+            cwd: input.sourceRoot,
+            detail: `Rift's new workspace could not be verified; it was left at ${input.destination}.`,
+          });
         }
         const receipt: RiftReceipt = {
           sourceRoot: input.sourceRoot,
@@ -376,14 +405,23 @@ export const makeRiftWorktrees = Effect.fn("makeRiftWorktrees")(function* (
    */
   const trash = Effect.fn("RiftWorktrees.trash")(function* (receipt: RiftReceipt) {
     const operation = "GitVcsDriver.removeWorktree.rift";
-    const fail = (detail: string) => riftError(operation, receipt.destination, detail);
     if (!(yield* fileSystem.exists(receipt.destination).pipe(Effect.orElseSucceed(() => true))))
       return;
     if ((yield* canonicalizeExistingPathOrParent(receipt.destination)) !== receipt.destination) {
-      return yield* fail("The Rift workspace path now points somewhere else; it was not removed.");
+      return yield* new GitCommandError({
+        operation,
+        command: "rift",
+        cwd: receipt.destination,
+        detail: "The Rift workspace path now points somewhere else; it was not removed.",
+      });
     }
     if ((yield* readMarker(receipt.destination)) !== receipt.riftId) {
-      return yield* fail("The folder is no longer the Rift workspace T3 Code created.");
+      return yield* new GitCommandError({
+        operation,
+        command: "rift",
+        cwd: receipt.destination,
+        detail: "The folder is no longer the Rift workspace T3 Code created.",
+      });
     }
     const [ancestors, children] = yield* Effect.all([
       rpc(
@@ -402,10 +440,20 @@ export const makeRiftWorktrees = Effect.fn("makeRiftWorktrees")(function* (
       ),
     ]);
     if (ancestors[0] !== receipt.sourceRoot) {
-      return yield* fail("Rift no longer lists this workspace under its project.");
+      return yield* new GitCommandError({
+        operation,
+        command: "rift",
+        cwd: receipt.destination,
+        detail: "Rift no longer lists this workspace under its project.",
+      });
     }
     if (children.length > 0) {
-      return yield* fail("This Rift workspace has its own Rift copies. Remove them first.");
+      return yield* new GitCommandError({
+        operation,
+        command: "rift",
+        cwd: receipt.destination,
+        detail: "This Rift workspace has its own Rift copies. Remove them first.",
+      });
     }
     yield* rpc(
       operation,

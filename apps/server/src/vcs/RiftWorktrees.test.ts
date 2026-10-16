@@ -6,6 +6,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { GitCommandError } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { assert, it } from "@effect/vitest";
+import * as Crypto from "effect/Crypto";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -75,6 +76,7 @@ it.layer(layer)("Rift worktrees", (it) => {
         const base = git(source, "rev-parse", "HEAD");
         NodeFS.writeFileSync(NodePath.join(source, "tracked.txt"), "next\n");
         git(source, "commit", "-qam", "next");
+        const main = git(source, "rev-parse", "main");
         git(source, "worktree", "add", "-q", NodePath.join(fixture.root, "linked"), "-b", "linked");
         NodeFS.writeFileSync(NodePath.join(source, "tracked.txt"), "dirty\n");
         NodeFS.writeFileSync(NodePath.join(source, "staged.txt"), "staged\n");
@@ -102,6 +104,9 @@ it.layer(layer)("Rift worktrees", (it) => {
           createdSourceBranch: null,
         });
         assert.equal(git(copy, "rev-parse", "HEAD"), base);
+        assert.equal(git(copy, "rev-parse", "main"), main);
+        assert.equal(git(other.worktree.path, "rev-parse", "main"), main);
+        assert.equal(git(copy, "diff", "--name-only", "main", "HEAD"), "tracked.txt");
         assert.equal(git(copy, "branch", "--show-current"), "t3/clean");
         assert.equal(git(copy, "status", "--porcelain", "--untracked-files=all"), "");
         assert.equal(NodeFS.readFileSync(NodePath.join(copy, "tracked.txt"), "utf8"), "base\n");
@@ -109,6 +114,7 @@ it.layer(layer)("Rift worktrees", (it) => {
         assert.isFalse(NodeFS.existsSync(NodePath.join(copy, ".git", "worktrees")));
 
         assert.equal(git(source, "branch", "--show-current"), "main");
+        assert.equal(git(source, "rev-parse", "main"), main);
         assert.equal(git(source, "branch", "--list", "t3/clean"), "");
         assert.equal(git(source, "diff", "--cached", "--name-only"), "staged.txt");
         assert.equal(NodeFS.readFileSync(NodePath.join(source, "tracked.txt"), "utf8"), "dirty\n");
@@ -280,6 +286,53 @@ it.layer(layer)("Rift worktrees", (it) => {
       }),
   );
 
+  it.effect.skipIf(riftExecutable === undefined || windows)(
+    "preserves the original digest and receipt-storage failures",
+    () =>
+      Effect.gen(function* () {
+        const fixture = yield* makeFixture;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const crypto = yield* Crypto.Crypto;
+        const cause = yield* Effect.flip(
+          fileSystem.readFileString(NodePath.join(fixture.root, "missing")),
+        );
+        for (const stage of ["digest", "receipt"] as const) {
+          const driver = yield* makeGitVcsDriverCore({
+            rift: {
+              ...(riftExecutable ? { executable: riftExecutable } : {}),
+              database: NodePath.join(fixture.root, "registry.sqlite"),
+            },
+          }).pipe(
+            Effect.provideService(Crypto.Crypto, {
+              ...crypto,
+              digest: stage === "digest" ? () => Effect.fail(cause) : crypto.digest,
+            }),
+            Effect.provideService(FileSystem.FileSystem, {
+              ...fileSystem,
+              rename: stage === "receipt" ? () => Effect.fail(cause) : fileSystem.rename,
+            }),
+          );
+          const error = yield* Effect.flip(
+            driver.createWorktree(
+              {
+                cwd: fixture.source,
+                refName: "main",
+                newRefName: `t3/${stage}`,
+                path: NodePath.join(fixture.worktrees, stage),
+              },
+              { backend: "rift" },
+            ),
+          );
+          assert.equal(
+            error.operation,
+            stage === "digest" ? "RiftWorktrees.receipt" : "RiftWorktrees.writeReceipt",
+          );
+          assert.strictEqual(error.cause, cause);
+          assert.notInclude(error.detail, "missing");
+        }
+      }),
+  );
+
   it.effect.skipIf(windows)("refuses project layouts whose copies could write back", () =>
     Effect.gen(function* () {
       const fixture = yield* makeFixture;
@@ -384,18 +437,20 @@ esac
         )).detail,
         "Rift create failed (unknown).",
       );
-      assert.equal(
-        (yield* errorFrom(fake("garbage", "secret garbage"))).detail,
-        "Rift returned an unexpected response. T3 Code supports Rift v0.0.13.",
-      );
-      assert.equal(
-        (yield* errorFrom(fake("wrong-shape", '{"status":"ok","value":42}'))).detail,
-        "Rift returned an unexpected response. T3 Code supports Rift v0.0.13.",
-      );
-      assert.include(
-        (yield* errorFrom(NodePath.join(fixture.root, "missing-rift"))).detail,
-        "Rift is not installed",
-      );
+      for (const executable of [
+        fake("garbage", "secret garbage"),
+        fake("wrong-shape", '{"status":"ok","value":42}'),
+      ]) {
+        const error = yield* errorFrom(executable);
+        assert.equal(
+          error.detail,
+          "Rift returned an unexpected response. T3 Code supports Rift v0.0.13.",
+        );
+        assert.deepInclude(error.cause, { _tag: "SchemaError" });
+      }
+      const missing = yield* errorFrom(NodePath.join(fixture.root, "missing-rift"));
+      assert.include(missing.detail, "Rift is not installed");
+      assert.deepInclude(missing.cause, { _tag: "ProcessSpawnError" });
       const unexpectedPath = yield* errorFrom(
         fake("wrong-path", '{"status":"ok","value":"/private/secret-cli-output"}'),
       );

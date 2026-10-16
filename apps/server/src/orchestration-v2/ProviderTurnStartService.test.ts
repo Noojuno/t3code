@@ -3,6 +3,7 @@ import { expect, it, vi } from "vite-plus/test";
 import { it as effectIt } from "@effect/vitest";
 import {
   CheckpointScopeId,
+  GitCommandError,
   MessageId,
   NodeId,
   ProviderSessionId,
@@ -28,7 +29,7 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 
-import { RIFT_REMOVED_WORKSPACE_OPERATION, riftError } from "../vcs/RiftWorktrees.ts";
+import { RIFT_REMOVED_WORKSPACE_OPERATION } from "../vcs/RiftWorktrees.ts";
 
 import { withWorkspaceLease } from "../workspace/workspaceLease.ts";
 import * as GitWorkflow from "../git/GitWorkflowService.ts";
@@ -97,11 +98,12 @@ it.each([{ removedRift: false }, { removedRift: true }])(
     );
     const startRootRun = vi.fn(() => Effect.void);
     const pruneWorktrees = vi.fn(() => Effect.void);
-    const removedRiftWorkspace = riftError(
-      RIFT_REMOVED_WORKSPACE_OPERATION,
-      "/tmp/provider-turn-start-project",
-      "This thread's Rift workspace was removed.",
-    );
+    const removedRiftWorkspace = new GitCommandError({
+      operation: RIFT_REMOVED_WORKSPACE_OPERATION,
+      command: "rift",
+      cwd: "/tmp/provider-turn-start-project",
+      detail: "This thread's Rift workspace was removed.",
+    });
     const createWorktree = vi.fn(() =>
       removedRift ? Effect.fail(removedRiftWorkspace) : Effect.succeed({} as never),
     );

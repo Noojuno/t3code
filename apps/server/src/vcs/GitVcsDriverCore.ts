@@ -48,7 +48,6 @@ import * as ServerConfig from "../config.ts";
 import {
   makeRiftWorktrees,
   RIFT_REMOVED_WORKSPACE_OPERATION,
-  riftError,
   type RiftChild,
   type RiftReceipt,
   type RiftWorktreesOptions,
@@ -3463,26 +3462,42 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     progress: GitVcsDriver.CreateWorktreeProgress | undefined,
   ) {
     const operation = "GitVcsDriver.createWorktree.rift";
-    const fail = (detail: string) => riftError(operation, input.cwd, detail);
     if (hostPlatform === "win32") {
-      return yield* fail(
-        "Rift worktrees are not supported on Windows. Switch Settings → Storage → Worktree backend to Git.",
-      );
+      return yield* new GitCommandError({
+        operation,
+        command: "rift",
+        cwd: input.cwd,
+        detail:
+          "Rift worktrees are not supported on Windows. Switch Settings → Storage → Worktree backend to Git.",
+      });
     }
     const toplevel = (yield* runGitStdout(operation, input.cwd, [
       "rev-parse",
       "--show-toplevel",
     ])).trim();
-    const sourceRoot = yield* fileSystem
-      .realPath(toplevel)
-      .pipe(Effect.mapError(() => fail("Could not resolve the project folder.")));
+    const sourceRoot = yield* fileSystem.realPath(toplevel).pipe(
+      Effect.mapError(
+        (cause) =>
+          new GitCommandError({
+            operation,
+            command: "rift",
+            cwd: input.cwd,
+            detail: "Could not resolve the project folder.",
+            cause,
+          }),
+      ),
+    );
     const gitDir = path.join(sourceRoot, ".git");
     const gitDirInfo = yield* fileSystem.stat(gitDir).pipe(Effect.orElseSucceed(() => null));
     const gitDirReal = yield* fileSystem.realPath(gitDir).pipe(Effect.orElseSucceed(() => null));
     if (gitDirInfo?.type !== "Directory" || gitDirReal !== gitDir) {
-      return yield* fail(
-        "Rift can only snapshot a project's main checkout, not a linked Git worktree. Add the main checkout as the project, or switch the worktree backend to Git.",
-      );
+      return yield* new GitCommandError({
+        operation,
+        command: "rift",
+        cwd: input.cwd,
+        detail:
+          "Rift can only snapshot a project's main checkout, not a linked Git worktree. Add the main checkout as the project, or switch the worktree backend to Git.",
+      });
     }
     // A copy of these layouts keeps pointers that Git would follow back into the project.
     const [hasSubmodules, hasModuleMetadata, hasSharedObjects, hasCommonDir, coreWorktree] =
@@ -3492,7 +3507,18 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         fileSystem.exists(path.join(gitDir, "objects", "info", "alternates")),
         fileSystem.exists(path.join(gitDir, "commondir")),
         readConfigValue(sourceRoot, "core.worktree"),
-      ]).pipe(Effect.mapError(() => fail("Could not inspect the project's Git layout.")));
+      ]).pipe(
+        Effect.mapError(
+          (cause) =>
+            new GitCommandError({
+              operation,
+              command: "rift",
+              cwd: input.cwd,
+              detail: "Could not inspect the project's Git layout.",
+              cause,
+            }),
+        ),
+      );
     if (
       hasSubmodules ||
       hasModuleMetadata ||
@@ -3500,9 +3526,13 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       hasCommonDir ||
       coreWorktree !== null
     ) {
-      return yield* fail(
-        "Rift worktrees do not support projects with submodules, shared object stores, or core.worktree yet. Switch the worktree backend to Git for this project.",
-      );
+      return yield* new GitCommandError({
+        operation,
+        command: "rift",
+        cwd: input.cwd,
+        detail:
+          "Rift worktrees do not support projects with submodules, shared object stores, or core.worktree yet. Switch the worktree backend to Git for this project.",
+      });
     }
     const commit = yield* runGitStdout(operation, sourceRoot, [
       "rev-parse",
@@ -3511,7 +3541,16 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       `${input.refName}^{commit}`,
     ]).pipe(
       Effect.map((stdout) => stdout.trim()),
-      Effect.mapError(() => fail(`Could not resolve '${input.refName}' to a commit.`)),
+      Effect.mapError(
+        (cause) =>
+          new GitCommandError({
+            operation,
+            command: "rift",
+            cwd: input.cwd,
+            detail: `Could not resolve '${input.refName}' to a commit.`,
+            cause,
+          }),
+      ),
     );
     const newBranch = input.newRefName ?? null;
     const existingBranch =
@@ -3547,9 +3586,12 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     }
     const name = path.basename(worktreePath);
     if (name.startsWith(".")) {
-      return yield* fail(
-        "Rift cannot use this worktree path. Folder names cannot start with a dot.",
-      );
+      return yield* new GitCommandError({
+        operation,
+        command: "rift",
+        cwd: input.cwd,
+        detail: "Rift cannot use this worktree path. Folder names cannot start with a dot.",
+      });
     }
     const destination = yield* fileSystem
       .makeDirectory(path.dirname(worktreePath), {
@@ -3558,7 +3600,16 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       .pipe(
         Effect.andThen(fileSystem.realPath(path.dirname(worktreePath))),
         Effect.map((parent) => path.join(parent, name)),
-        Effect.mapError(() => fail("Could not create the worktree folder.")),
+        Effect.mapError(
+          (cause) =>
+            new GitCommandError({
+              operation,
+              command: "rift",
+              cwd: input.cwd,
+              detail: "Could not create the worktree folder.",
+              cause,
+            }),
+        ),
       );
     if (yield* fileSystem.exists(destination).pipe(Effect.orElseSucceed(() => true))) {
       return yield* new GitCommandError({
@@ -3579,7 +3630,12 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       const adminDir = path.join(destination, ".git", "worktrees");
       if (yield* fileSystem.exists(adminDir)) {
         if ((yield* fileSystem.realPath(adminDir)) !== adminDir) {
-          return yield* fail("The new Rift workspace has unexpected Git metadata.");
+          return yield* new GitCommandError({
+            operation,
+            command: "rift",
+            cwd: input.cwd,
+            detail: "The new Rift workspace has unexpected Git metadata.",
+          });
         }
         yield* fileSystem.remove(adminDir, { recursive: true });
       }
@@ -3591,7 +3647,12 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         yield* gitInCopy(["switch", "--quiet", "--no-guess", existingBranch]);
       const head = (yield* runGitStdout(operation, destination, ["rev-parse", "HEAD"])).trim();
       if (head !== commit) {
-        return yield* fail("The new Rift workspace did not reach the selected commit.");
+        return yield* new GitCommandError({
+          operation,
+          command: "rift",
+          cwd: input.cwd,
+          detail: "The new Rift workspace did not reach the selected commit.",
+        });
       }
       if (newBranch !== null && input.baseRefName) {
         const baseBranch = yield* resolveBranchName(destination, input.baseRefName);
@@ -3605,7 +3666,15 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       }
     }).pipe(
       Effect.mapError((error) =>
-        isGitCommandError(error) ? error : fail("Could not prepare the new Rift workspace."),
+        isGitCommandError(error)
+          ? error
+          : new GitCommandError({
+              operation,
+              command: "rift",
+              cwd: input.cwd,
+              detail: "Could not prepare the new Rift workspace.",
+              cause: error,
+            }),
       ),
     );
 
@@ -3653,11 +3722,13 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
     }
     const receipt = yield* rift.receiptAt(worktreePath);
     if (receipt !== null && (yield* rift.inspect(receipt)) === "missing") {
-      return yield* riftError(
-        RIFT_REMOVED_WORKSPACE_OPERATION,
-        input.cwd,
-        "This path belongs to a removed Rift workspace. Its branches and checkpoints lived only there, so T3 Code will not recreate it from the project. Restore the folder from Rift's trash, or start a new thread with a different branch name or worktree location.",
-      );
+      return yield* new GitCommandError({
+        operation: RIFT_REMOVED_WORKSPACE_OPERATION,
+        command: "rift",
+        cwd: input.cwd,
+        detail:
+          "This path belongs to a removed Rift workspace. Its branches and checkpoints lived only there, so T3 Code will not recreate it from the project. Restore the folder from Rift's trash, or start a new thread with a different branch name or worktree location.",
+      });
     }
     if (options?.backend === "rift") {
       return yield* createRiftWorktree(input, worktreePath, options.progress);
@@ -4041,11 +4112,12 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         "--untracked-files=normal",
       ]);
       if (status.trim().length > 0) {
-        return yield* riftError(
+        return yield* new GitCommandError({
           operation,
-          input.cwd,
-          "The Rift workspace has uncommitted changes, so it was not removed.",
-        );
+          command: "rift",
+          cwd: input.cwd,
+          detail: "The Rift workspace has uncommitted changes, so it was not removed.",
+        });
       }
       const localCommits = (yield* runGitStdout(operation, receipt.destination, [
         "rev-list",
@@ -4072,11 +4144,12 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
             ),
           )));
       if (!retained) {
-        return yield* riftError(
+        return yield* new GitCommandError({
           operation,
-          input.cwd,
-          "The Rift workspace has commits that exist only there, so it was not removed.",
-        );
+          command: "rift",
+          cwd: input.cwd,
+          detail: "The Rift workspace has commits that exist only there, so it was not removed.",
+        });
       }
     }
     yield* rift.trash(receipt);

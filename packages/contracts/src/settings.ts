@@ -1059,7 +1059,10 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed([])),
   ),
   /** Creates new worktrees only; existing ones keep the backend that made them. */
-  worktreeBackend: WorktreeBackend.pipe(Schema.withDecodingDefault(Effect.succeed("git" as const))),
+  worktreeBackend: WorktreeBackend.pipe(
+    Schema.catchDecoding(() => Effect.succeedSome("git" as const)),
+    Schema.withDecodingDefault(Effect.succeed("git" as const)),
+  ),
   responseStreamingMode: ResponseStreamingMode.pipe(
     Schema.withDecodingDefault(Effect.succeed("paragraph" as const)),
   ),
